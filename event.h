@@ -7,11 +7,12 @@
 #include <vector>
 #include <algorithm>
 #include <numeric>
+#include "utils.h"
 
 namespace Worms {
 
     /* Just to facilitate parsing incoming data */
-    struct __attribute__((packed)) EventHeader {
+    struct EventHeader {
         uint32_t len;
         uint32_t event_no;
         uint8_t event_type;
@@ -21,28 +22,28 @@ namespace Worms {
             sizeof(EventHeader::len) + sizeof(EventHeader::event_no) +
             sizeof(EventHeader::event_type) + sizeof(uint32_t);
 
-    struct __attribute__((packed)) Event {
+    struct Event {
         virtual ~Event() = default;
 
         [[nodiscard]] virtual size_t size() const = 0;
 
-        virtual void pack(uint8_t **buff) = 0;
+        virtual void pack(SendBuffer& buff) = 0;
 
         virtual void unpack(uint8_t const** buff) = 0;
     };
 
-    struct __attribute__((packed)) EventDataIface {
+    struct EventDataIface {
         virtual ~EventDataIface() = default;
 
         [[nodiscard]] virtual size_t size() const = 0;
 
-        virtual void pack(uint8_t **buff) = 0;
+        virtual void pack(SendBuffer& buff) = 0;
 
         virtual void unpack(uint8_t const** buff) = 0;
     };
 
     template<typename EventData>
-    struct __attribute__((packed)) EventTemplate {
+    struct EventTemplate {
         static_assert(std::is_base_of_v<EventDataIface, EventData>);
 
         uint32_t len;
@@ -54,22 +55,35 @@ namespace Worms {
         [[nodiscard]] size_t size() const {
             return event_nodata_size + event_data.size();
         }
-        void pack(uint8_t **const buff) {
+        void pack(SendBuffer& buff) {
             pack_header(buff);
-            event_data.pack();
+            event_data.pack(buff);
             pack_crc(buff);
         }
+        void unpack(uint8_t const**const buff) {
+            unpack_header(buff);
+            event_data.unpack(buff);
+            unpack_crc(buff);
+        }
     protected:
-        void pack_header(uint8_t **const buff) {
-            *((typeof(len)*)*buff) = len;
+        void pack_header(SendBuffer& buff) {
+            buff.pack_field(len);
+            buff.pack_field(event_no);
+            buff.pack_field(event_type);
+        }
+        void pack_crc(SendBuffer& buff) {
+            buff.pack_field(crc32);
+        }
+        void unpack_header(uint8_t **const buff) {
+            len = *((typeof(len)*)*buff);
             *buff += sizeof(len);
-            *((typeof(event_no)*)*buff) = event_no;
+            event_no = *((typeof(event_no)*)*buff);
             *buff += sizeof(event_no);
-            *((typeof(event_type)*)*buff) = event_type;
+            event_type = *((typeof(event_type)*)*buff);
             *buff += sizeof(event_type);
         }
-        void pack_crc(uint8_t **const buff) {
-            *((typeof(crc32)*)*buff) = crc32;
+        void unpack_crc(uint8_t **const buff) {
+            crc32 = *((typeof(crc32)*)*buff);
             *buff += sizeof(crc32);
         }
     };
@@ -79,19 +93,19 @@ namespace Worms {
     /* NEW_GAME */
     constexpr uint8_t const NEW_GAME_NUM = 0;
 
-    struct __attribute__((packed)) Data_NEW_GAME : public EventDataIface {
+    struct Data_NEW_GAME : public EventDataIface {
         uint32_t maxx;
         uint32_t maxy;
         std::vector<std::string> players;
 
         [[nodiscard]] size_t size() const override {
             return sizeof(maxx) + sizeof(maxy) + std::accumulate(
-                    players.begin(), players.end(),0ul,
+                    players.begin(), players.end(),0,
                     [](size_t sum, std::string const& s){
                         return sum += s.size();
                     });
         }
-        void pack(uint8_t **const buff) override {
+        void pack(SendBuffer& buff) override {
 
         }
         void unpack(uint8_t const**const buff) override {
@@ -99,11 +113,11 @@ namespace Worms {
         }
     };
 
-    struct __attribute__((packed)) Event_NEW_GAME : public EventTemplate<Data_NEW_GAME> {};
+    struct Event_NEW_GAME : public EventTemplate<Data_NEW_GAME> {};
 
     /* PIXEL */
     constexpr uint8_t const PIXEL_NUM = 1;
-    struct __attribute__((packed)) Data_PIXEL : public EventDataIface {
+    struct Data_PIXEL : public EventDataIface {
         uint8_t player_number;
         uint32_t x;
         uint32_t y;
@@ -111,52 +125,48 @@ namespace Worms {
         [[nodiscard]] size_t size() const override {
             return sizeof(player_number) + sizeof(x) + sizeof(y);
         }
-        void pack(uint8_t **const buff) override {
-            *((typeof(player_number)*)*buff) = player_number;
-            *buff += sizeof(player_number);
-            *((typeof(x)*)*buff) = x;
-            *buff += sizeof(x);
-            *((typeof(y)*)*buff) = y;
-            *buff += sizeof(y);
+        void pack(SendBuffer& buff) override {
+            buff.pack_field(player_number);
+            buff.pack_field(x);
+            buff.pack_field(y);
         }
         void unpack(uint8_t const**const buff) override {
 
         }
     };
 
-    struct __attribute__((packed)) Event_PIXEL : public EventTemplate<Data_PIXEL> {};
+    struct Event_PIXEL : public EventTemplate<Data_PIXEL> {};
 
     /* PLAYER_ELIMINATED */
     constexpr uint8_t const PLAYER_ELIMINATED_NUM = 2;
-    struct __attribute__((packed)) Data_PLAYER_ELIMINATED : public EventDataIface {
+    struct Data_PLAYER_ELIMINATED : public EventDataIface {
         uint8_t player_number;
 
         [[nodiscard]] size_t size() const override {
             return sizeof(player_number);
         }
-        void pack(uint8_t **const buff) override {
-            *((typeof(player_number)*)*buff) = player_number;
-            *buff += sizeof(player_number);
+        void pack(SendBuffer& buff) override {
+            buff.pack_field(player_number);
         }
         void unpack(uint8_t const**const buff) override {
 
         }
     };
 
-    struct __attribute__((packed)) Event_PLAYER_ELIMINATED
+    struct Event_PLAYER_ELIMINATED
             : public EventTemplate<Data_PLAYER_ELIMINATED> {};
 
     /* GAME_OVER */
     constexpr uint8_t const GAME_OVER_NUM = 3;
-    struct __attribute__((packed)) Data_GAME_OVER : public EventDataIface {
+    struct Data_GAME_OVER : public EventDataIface {
         [[nodiscard]] size_t size() const override {
             return 0;
         }
-        void pack(uint8_t **const buff) override {}
-        void unpack(uint8_t const**const buff) override {}
+        void pack(SendBuffer&) override {}
+        void unpack(uint8_t const**const) override {}
     };
 
-    struct __attribute__((packed)) Event_GAME_OVER : public EventTemplate<Data_GAME_OVER> {};
+    struct Event_GAME_OVER : public EventTemplate<Data_GAME_OVER> {};
 }
 
 #endif //ROBAKI_EVENT_H

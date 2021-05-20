@@ -3,13 +3,15 @@ project(Robaki)
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(CMAKE_CXX_FLAGS "-Wall -Wextra -O2 -std=c++17")
+#set(CMAKE_CXX_COMPILER clang)
 
-add_library(err err.c)
+set(CMAKE_CXX_FLAGS "-Wall -Wextra -O2 -std=gnu++17")
 
-add_executable(screen-worms-client client.cpp event.cpp event.h)
+add_library(err err.cpp err.h)
+
+add_executable(screen-worms-client client.cpp event.h utils.h)
 target_link_libraries(screen-worms-client err)
-add_executable(screen-worms-server server.cpp event.cpp event.h)
+add_executable(screen-worms-server server.cpp event.h utils.h)
 target_link_libraries(screen-worms-server err)
 
 find_package(PkgConfig REQUIRED)
