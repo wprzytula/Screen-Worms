@@ -14,8 +14,8 @@ extern void fatal(const char *fmt, ...);
 /* Prettifying macro */
 #define verify(action, message) \
 do { \
-    if ((err = (action)) != 0) \
-        syserr(err, message); \
+    if ((action) == -1) \
+        syserr(errno, message); \
 } while (0)
 
 #ifdef DEBUG

@@ -9,9 +9,9 @@ set(CMAKE_CXX_FLAGS "-Wall -Wextra -O2 -std=gnu++17")
 
 add_library(err err.cpp err.h)
 
-add_executable(screen-worms-client client.cpp event.h utils.h)
+add_executable(screen-worms-client client.cpp Event.h Buffer.h Crc32Computer.h ClientHeartbeat.h Pixel.h misc.h)
 target_link_libraries(screen-worms-client err)
-add_executable(screen-worms-server server.cpp event.h utils.h)
+add_executable(screen-worms-server server.cpp Event.h Buffer.h RandomGenerator.h Board.h GameConstants.h Crc32Computer.h ClientHeartbeat.h Pixel.h PlayerID.h misc.h)
 target_link_libraries(screen-worms-server err)
 
 find_package(PkgConfig REQUIRED)

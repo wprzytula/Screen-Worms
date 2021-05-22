@@ -1,82 +1,14 @@
-#ifndef ROBAKI_UTILS_H
-#define ROBAKI_UTILS_H
+#ifndef ROBAKI_CRC32COMPUTER_H
+#define ROBAKI_CRC32COMPUTER_H
 
-#include <sys/types.h>
 #include <cstdint>
 
 namespace Worms {
-
-    constexpr uint16_t const MAX_DATA_SIZE = 550;
-
-    struct Pixel {
-        uint32_t const x;
-        uint32_t const y;
-
-        [[nodiscard]] bool on_board(uint32_t board_width, uint32_t board_height) const {
-            return x < board_width && y < board_height;
-        }
-
-        Pixel(uint32_t const x, uint32_t const y) : x(x), y(y) {}
-    };
-
-    class Receiver {
-        int const sock;
-        sockaddr_in6 const address;
-        socklen_t const addr_len;
+    class Crc32Computer {
     public:
-        Receiver(int const sock, sockaddr_in6 const &addr, socklen_t const addr_len)
-                : sock{sock}, address{addr}, addr_len(addr_len) {
-            int err;
-            verify(connect(sock, (sockaddr const *) &addr, addr_len), "connect");
-        }
-
-        ssize_t sendthere(void const *buff, size_t len, int flags) { // NOLINT(readability-make-member-function-const)
-            return send(sock, buff, len, flags);
-        }
-    };
-
-    class SendBuffer {
+        using crc32_t = uint32_t;
     private:
-        static uint8_t buff[MAX_DATA_SIZE];
-        uint16_t _size;
-        Receiver receiver;
-
-    public:
-        SendBuffer(uint16_t const size, Receiver receiver)
-                : _size{0}, receiver{std::move(receiver)} {}
-
-        [[nodiscard]] uint16_t size() const {
-            return _size;
-        }
-
-        [[nodiscard]] uint16_t remaining() const {
-            return MAX_DATA_SIZE - _size;
-        }
-
-        void flush() {
-            int sflags = 0;
-            receiver.sendthere(buff, _size, sflags);
-        }
-
-        template<typename T>
-        void pack_field(T field) {
-            assert(remaining() >= sizeof(T))
-            *((T*)*buff) = field;
-            *buff += sizeof(T);
-            _size += sizeof(T);
-        }
-    };
-
-/*
- * Function CRC32
- * Input:
- * data:  Bytes     // Array of bytes
- * Output:
- * crc32: UInt32    // 32-bit unsigned CRC-32 value
- * */
-    uint32_t crc32(uint8_t const *arr, size_t const len) {
-        // Table for CRC calculation
-        static constexpr uint32_t const crc_table[256] {
+        static constexpr crc32_t const crc_table[256]{
                 0x00000000u, 0x77073096u, 0xee0e612cu, 0x990951bau, 0x076dc419u,
                 0x706af48fu, 0xe963a535u, 0x9e6495a3u, 0x0edb8832u, 0x79dcb8a4u,
                 0xe0d5e91eu, 0x97d2d988u, 0x09b64c2bu, 0x7eb17cbdu, 0xe7b82d07u,
@@ -130,22 +62,38 @@ namespace Worms {
                 0x5d681b02u, 0x2a6f2b94u, 0xb40bbe37u, 0xc30c8ea1u, 0x5a05df1bu,
                 0x2d02ef8du
         };
-        size_t lookup_index;
-// Initialize CRC-32 to starting value
-        uint32_t result = 0xFFFFFFFF;
+        crc32_t crc32;
+    public:
+        Crc32Computer() : crc32{0xFFFFFFFF} {}
 
-        for (size_t i = 0; i < len; ++i) {
-//        nLookupIndex ← (crc32 xor byte) and 0xFF;
-            lookup_index = (result ^ arr[i]) & 0xFF;
-//    crc32 ← (crc32 shr 8) xor CRCTable[nLookupIndex]  // CRCTable is an array of 256 32-bit constants
-            result = (result >> 8) ^ crc_table[lookup_index];
+        template<typename T>
+        void add(T const &data) {
+            static_assert(std::is_trivial_v < T > );
+
+            auto const *data_ptr = reinterpret_cast<uint8_t const *>(&data);
+            size_t const len = sizeof(T) / sizeof(uint8_t);
+
+            for (size_t i = 0; i < len; ++i) {
+                size_t lookup_index = (crc32 ^ data_ptr[i]) & 0xFF;
+                crc32 = (crc32 >> 8) ^ crc_table[lookup_index];
+            }
         }
 
-// Finalize the CRC-32 value by inverting all the bits
-//    crc32 ← crc32 xor 0xFFFFFFFF
-        result ^= 0xFFFFFFFF;
-        return result;
+        [[nodiscard]] crc32_t value() const {
+            return crc32;
+        }
+    };
+
+    template<>
+    void Crc32Computer::add<std::string>(std::string const &data) {
+        for (uint8_t i : data) {
+            size_t lookup_index = (crc32 ^ i) & 0xFF;
+            crc32 = (crc32 >> 8) ^ crc_table[lookup_index];
+        }
     }
+
+
+    using crc32_t = Crc32Computer::crc32_t;
 }
 
-#endif //ROBAKI_UTILS_H
+#endif //ROBAKI_CRC32COMPUTER_H
