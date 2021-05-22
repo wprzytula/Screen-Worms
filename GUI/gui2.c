@@ -302,7 +302,7 @@ gint main (gint argc, gchar *argv[]) {
   GtkWidget *button;
   int idle_id;
 
-  unsigned short port = 12346;  //default
+  unsigned short port = 20210;  //default
 
   // Opcjonalny port
   if (argc > 1)
@@ -320,12 +320,12 @@ gint main (gint argc, gchar *argv[]) {
   
   // Utworzenie głównego okna aplikacji
   window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-  gtk_window_set_title(GTK_WINDOW (window), "Netacka GUI");
-  gtk_window_set_default_size(GTK_WINDOW (window), 300, 300);
+  gtk_window_set_title(GTK_WINDOW (window), "Screen Worms GUI");
+  gtk_window_set_default_size(GTK_WINDOW (window), 640, 480);
   gtk_window_set_resizable(GTK_WINDOW (window), TRUE);  /***/
 
   // Callback dla zamknięcia okna przez użytkownika
-  g_signal_connect(window, "delete-EventTemplate",
+  g_signal_connect(window, "delete-event",
                    G_CALLBACK(destroy_window), NULL);
 
   // Maska zdarzeń dla klawiatury
@@ -333,9 +333,9 @@ gint main (gint argc, gchar *argv[]) {
                         GDK_KEY_PRESS_MASK | GDK_KEY_RELEASE_MASK);
 
   // Callbacki dla klawiatury
-  g_signal_connect(window, "key-press-EventTemplate",
+  g_signal_connect(window, "key-press-event",
 		   G_CALLBACK(keyboard_event), "press");
-  g_signal_connect(window, "key-release-EventTemplate",
+  g_signal_connect(window, "key-release-event", 
                    G_CALLBACK(keyboard_event), "release");
     
   // Kontener główny
@@ -382,9 +382,9 @@ gint main (gint argc, gchar *argv[]) {
   gtk_widget_modify_bg(drawing_area, GTK_STATE_NORMAL, &color);       
 
   // Obsługa kopii pola gry
-  g_signal_connect(drawing_area, "expose-EventTemplate",
+  g_signal_connect(drawing_area, "expose-event",
                    G_CALLBACK(expose_event), NULL);
-  g_signal_connect(drawing_area, "configure-EventTemplate",
+  g_signal_connect(drawing_area, "configure-event",
                    G_CALLBACK(configure_event), NULL);
     
   // Tworzenie kontenera do dynamicznej listy graczy
