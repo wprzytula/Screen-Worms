@@ -74,6 +74,14 @@ namespace Worms {
                 fputs("Error closing timer fd", stderr);
         }
         void mainloop() {
+            {
+                struct timespec spec{.tv_sec = 0, .tv_nsec = 1'000'000'000 /
+                        constants.round_per_sec};
+                struct itimerspec conf{.it_interval = spec, .it_value = spec};
+                timerfd_settime(round_timer, 0, &conf, nullptr);
+            }
+
+
 
         }
     };

@@ -48,6 +48,14 @@ namespace Worms {
             if (close(heartbeat_timer) != 0)
                 fputs("Error closing timer fd", stderr);
         }
+
+        void play() {
+            {
+                struct timespec spec{.tv_sec = 0, .tv_nsec = 30'000'000};
+                struct itimerspec conf{.it_interval = spec, .it_value = spec};
+                timerfd_settime(heartbeat_timer, 0, &conf, nullptr);
+            }
+        }
     };
 }
 
