@@ -1,7 +1,7 @@
 #ifndef ROBAKI_BOARD_H
 #define ROBAKI_BOARD_H
 
-#include <cstdint>
+#include "defs.h"
 #include "Buffer.h"
 #include "Pixel.h"
 #include "PlayerID.h"

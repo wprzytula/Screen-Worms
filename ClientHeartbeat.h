@@ -1,7 +1,7 @@
 #ifndef ROBAKI_CLIENTHEARTBEAT_H
 #define ROBAKI_CLIENTHEARTBEAT_H
 
-#include <cstdint>
+#include "defs.h"
 #include "Buffer.h"
 
 namespace Worms {
@@ -18,7 +18,7 @@ namespace Worms {
                   next_expected_event_no(next_expected_event_no),
                   player_name(std::move(player_name)) {}
 
-        ClientHeartbeat(ReceiveBuffer &buff) {
+        explicit ClientHeartbeat(ReceiveBuffer &buff) {
             buff.unpack_field(session_id);
             buff.unpack_field(turn_direction);
             buff.unpack_field(next_expected_event_no);

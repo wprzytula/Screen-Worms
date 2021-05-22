@@ -1,8 +1,7 @@
 #ifndef ROBAKI_PLAYERID_H
 #define ROBAKI_PLAYERID_H
 
-#include <netinet/in.h>
-#include "cstdint"
+#include "defs.h"
 
 namespace Worms {
     struct PlayerID {

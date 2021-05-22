@@ -1,18 +1,9 @@
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/timerfd.h>
-#include <netinet/in.h>
-#include <string>
-#include <unistd.h>
 #include <cstdlib>
-#include <fstream>
-#include <cassert>
 #include <memory>
 #include <ctgmath>
 #include <sys/fcntl.h>
 #include <queue>
 #include <set>
-#include <cstring>
 
 #include "err.h"
 #include "Event.h"
@@ -78,7 +69,7 @@ namespace Worms {
         }
         ~Server() {
             if (close(sock) != 0)
-                fputs("Error closing server socket", stderr);
+                fputs("Error closing server_addr socket", stderr);
             if (close(round_timer) != 0)
                 fputs("Error closing timer fd", stderr);
         }

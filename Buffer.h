@@ -1,9 +1,7 @@
 #ifndef ROBAKI_BUFFER_H
 #define ROBAKI_BUFFER_H
 
-#include <cstdint>
-#include <cstring>
-#include "err.h"
+#include "defs.h"
 
 namespace Worms {
 

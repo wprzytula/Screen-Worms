@@ -1,13 +1,9 @@
 #ifndef ROBAKI_EVENT_H
 #define ROBAKI_EVENT_H
 
-#include <sys/types.h>
-#include <cstdint>
-#include <string>
-#include <utility>
-#include <vector>
-#include <algorithm>
 #include <numeric>
+
+#include "defs.h"
 #include "Buffer.h"
 #include "Crc32Computer.h"
 

@@ -1,7 +1,7 @@
 #ifndef ROBAKI_PIXEL_H
 #define ROBAKI_PIXEL_H
 
-#include <cstdint>
+#include "defs.h"
 
 namespace Worms {
     struct Pixel {

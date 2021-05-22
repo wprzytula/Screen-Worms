@@ -1,7 +1,7 @@
 #ifndef ROBAKI_CRC32COMPUTER_H
 #define ROBAKI_CRC32COMPUTER_H
 
-#include <cstdint>
+#include "defs.h"
 
 namespace Worms {
     class Crc32Computer {

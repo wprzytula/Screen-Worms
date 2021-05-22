@@ -1,82 +1,22 @@
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <string>
-#include <unistd.h>
-#include <cstdlib>
-#include <fstream>
-#include <unordered_map>
-#include <regex>
-#include <cassert>
-#include <sys/stat.h>
 #include <fcntl.h>
-#include <filesystem>
-#include <csignal>
 #include <sys/timerfd.h>
+#include <getopt.h>
 
-#include "err.h"
-#include "misc.h"
+#include "defs.h"
+#include "GetAddrInfoRAII.h"
 
 #define QUEUE_LENGTH 5
 #define BUFFER_SIZE 1024
 
 namespace Worms {
 
-    class GetAddrInfoRAII {
-    private:
-        struct addrinfo *addr_result{};
-        sockaddr_in6 _address{};
-    public:
-        GetAddrInfoRAII(int sock_type, char const *name, uint16_t port) {
-            int sock;
-            struct addrinfo addr_hints{};
-            int i, flags, sflags, err;
-            size_t len;
-            socklen_t rcva_len;
-
-            assert(sock_type == SOCK_DGRAM || sock_type == SOCK_STREAM);
-
-            // 'converting' host/port in string to struct addrinfo
-            (void) memset(&addr_hints, 0, sizeof(struct addrinfo));
-            addr_hints.ai_family = AF_INET6;
-            addr_hints.ai_socktype = sock_type;
-            addr_hints.ai_protocol = sock_type == SOCK_DGRAM ? IPPROTO_UDP : IPPROTO_TCP;
-            addr_hints.ai_flags = 0;
-            addr_hints.ai_addrlen = 0;
-            addr_hints.ai_addr = nullptr;
-            addr_hints.ai_canonname = nullptr;
-            addr_hints.ai_next = nullptr;
-            err = getaddrinfo(name, nullptr, &addr_hints, &addr_result);
-            if (err == EAI_SYSTEM) { // system error
-                syserr(errno, "getaddrinfo: %s", gai_strerror(err));
-            }
-            else if (err != 0) { // other error (host not found, etc.)
-                fatal("getaddrinfo: %s", gai_strerror(err));
-            }
-
-            _address.sin6_family = AF_INET6;
-            _address.sin6_addr =
-                    ((struct sockaddr_in6*)addr_result->ai_addr)->sin6_addr;
-            _address.sin6_port = htobe16(port); // port from the command line
-        }
-
-        ~GetAddrInfoRAII() {
-            freeaddrinfo(addr_result);
-        }
-
-        [[nodiscard]] struct sockaddr_in6 address() const {
-            return _address;
-        }
-    };
-
     class Client {
     private:
         timestamp_t const ts;
         std::string const player_name;
-        struct sockaddr_in6 const game_server;
+        struct sockaddr_in6 const server_addr;
         int const server_sock;
-        struct sockaddr_in6 const game_iface;
+        struct sockaddr_in6 const iface_addr;
         int const iface_sock;
         int const heartbeat_timer;
 
@@ -86,17 +26,28 @@ namespace Worms {
             : ts{std::chrono::time_point_cast<std::chrono::microseconds>(
                  std::chrono::system_clock::now())},
               player_name{std::move(player_name)},
-              game_server{GetAddrInfoRAII{SOCK_DGRAM, game_server, server_port}.address()},
+              server_addr{GetAddrInfoRAII{SOCK_DGRAM, game_server, server_port}.address()},
               server_sock{socket(PF_INET6, SOCK_DGRAM, IPPROTO_UDP)},
-              game_iface{GetAddrInfoRAII{SOCK_STREAM, game_iface, iface_port}.address()},
+              iface_addr{GetAddrInfoRAII{SOCK_STREAM, game_iface, iface_port}.address()},
               iface_sock{socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP)},
               heartbeat_timer{timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK)} {
             if (server_sock < 0 || iface_sock < 0)
                 syserr(errno, "opening sockets");
             if (heartbeat_timer < 0)
                 syserr(errno, "opening timer fd");
+            verify(connect(server_sock, (struct sockaddr*)&server_addr, sizeof(server_addr)),
+                    "connecting to server");
+            verify(connect(iface_sock, (struct sockaddr*)&iface_addr, sizeof(iface_addr)),
+                   "connecting to interface");
         }
-
+        ~Client() {
+            if (close(server_sock) != 0)
+                fputs("Error closing server socket", stderr);
+            if (close(iface_sock) != 0)
+                fputs("Error closing interface socket", stderr);
+            if (close(heartbeat_timer) != 0)
+                fputs("Error closing timer fd", stderr);
+        }
     };
 }
 
@@ -155,7 +106,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    Worms::Client{std::move(player_name), game_server, server_port,
+    Worms::Client client{std::move(player_name), game_server, server_port,
                   game_iface, iface_port};
 
     return 0;
