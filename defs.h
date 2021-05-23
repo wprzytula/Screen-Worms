@@ -20,4 +20,38 @@
 
 #include "err.h"
 
+namespace Worms {
+    template<typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
+    inline T htobe(T field) {
+        constexpr size_t size = sizeof(field);
+        if constexpr(size == 1) {
+            return field;
+        } else if constexpr (size == 2) {
+            return htobe16(field);
+        } else if constexpr (size == 4) {
+            return htobe32(field);
+        } else if constexpr (size == 8) {
+            return htobe64(field);
+        } else {
+            assert(false);
+        }
+    }
+
+    template<typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
+    inline T betoh(T field) {
+        constexpr size_t size = sizeof(field);
+        if constexpr(size == 1) {
+            return field;
+        } else if constexpr (size == 2) {
+            return be16toh(field);
+        } else if constexpr (size == 4) {
+            return be32toh(field);
+        } else if constexpr (size == 8) {
+            return be64toh(field);
+        } else {
+            assert(false);
+        }
+    }
+}
+
 #endif //ROBAKI_DEFS_H
