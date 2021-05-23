@@ -7,34 +7,37 @@ namespace Worms {
 
     constexpr uint16_t const MAX_DATA_SIZE = 550;
 
-    class Receiver {
+    class UDPEndpoint {
     private:
         int const sock;
         sockaddr_in6 const address;
-        socklen_t const addr_len;
+//        socklen_t const addr_len;
     public:
-        Receiver(int const sock, sockaddr_in6 const &addr, socklen_t const addr_len)
-                : sock{sock}, address{addr}, addr_len(addr_len) {
+        UDPEndpoint(int const sock, sockaddr_in6 const &addr, socklen_t const addr_len)
+                : sock{sock}, address{addr}/*, addr_len(addr_len)*/ {
             int err;
-            verify(connect(sock, (sockaddr const *) &addr, addr_len), "connect");
+            verify(connect(sock, (sockaddr const *) &addr, sizeof(sockaddr_in6)), "connect");
         }
 
         ssize_t sendthere(void const *buff, size_t len, int flags) { // NOLINT(readability-make-member-function-const)
             return send(sock, buff, len, flags);
         }
+        ssize_t recvfromthere(void *buff, int flags) { // NOLINT(readability-make-member-function-const)
+            return recv(sock, buff, MAX_DATA_SIZE, flags);
+        }
     };
 
-    class SendBuffer {
+    class UDPSendBuffer {
     private:
         char buff[MAX_DATA_SIZE] = {0};
         uint16_t _size;
-        Receiver receiver;
+        UDPEndpoint receiver;
 
     public:
-        SendBuffer(uint16_t const size, Receiver receiver)
+        explicit UDPSendBuffer(UDPEndpoint receiver)
                 : _size{0}, receiver{std::move(receiver)} {}
 
-        ~SendBuffer() {
+        ~UDPSendBuffer() {
             assert(_size == 0);
         }
 
@@ -46,9 +49,14 @@ namespace Worms {
             return MAX_DATA_SIZE - _size;
         }
 
+        void clear() {
+            _size = 0;
+        }
+
         ssize_t flush() {
             int sflags = 0;
             ssize_t res = receiver.sendthere(buff, _size, sflags);
+            assert(_size == res);
             if (res != -1)
                 _size = 0;
             return res;
@@ -84,14 +92,14 @@ namespace Worms {
 
     class UnendedName : public std::exception {};
 
-    class ReceiveBuffer {
+    class UDPReceiveBuffer {
     private:
         static char buff[MAX_DATA_SIZE];
         uint16_t size;
         uint16_t pos;
 
     public:
-        ReceiveBuffer() : size{0}, pos{0} {}
+        UDPReceiveBuffer() : size{0}, pos{0} {}
 
         [[nodiscard]] uint16_t remaining() const {
             return size - pos;
@@ -138,6 +146,120 @@ namespace Worms {
             while (pos < size)
                 s.push_back(buff[pos++]);
         }
+    };
+
+    class TCPSendBuffer {
+    private:
+        int const sock;
+        size_t const initial_capacity;
+        char *buff;
+        size_t beg;
+        size_t end;
+        size_t size;
+        size_t capacity;
+    public:
+        explicit TCPSendBuffer(int sock, size_t capacity)
+            : sock{sock}, initial_capacity{capacity}, beg{0}, end{0}, size{0}, capacity{capacity} {
+            buff = static_cast<char*>(malloc(capacity));
+            if (buff == nullptr)
+                syserr(errno, "malloc");
+        }
+    private:
+        void grow() {
+            capacity <<= 1;
+            buff = static_cast<char*>(realloc(buff, capacity));
+            if (buff == nullptr)
+                fatal("realloc");
+
+            memcpy(buff + capacity / 2, buff, beg);
+            end = (beg + size) % capacity;
+        }
+
+        void shrink() {
+            assert(capacity > initial_capacity);
+            capacity = initial_capacity;
+            buff = static_cast<char*>(realloc(buff, initial_capacity));
+            if (buff == nullptr)
+                fatal("realloc failed");
+        }
+
+    public:
+        void pack_word(std::string const& s) {
+            if (capacity - size < s.size() + 1)
+                grow();
+            char const *ptr = s.c_str();
+            if (capacity - end < s.size()) {
+                size_t first_portion = capacity - end;
+                memcpy(buff + end, ptr, first_portion);
+                memcpy(buff, ptr + first_portion, s.size() - first_portion);
+            } else {
+                memcpy(buff + end, ptr, s.size());
+            }
+            end = (end + s.size()) % capacity;
+            buff[end] = ' ';
+            end = (end + 1) % capacity;
+            size += s.size() + 1;
+        }
+        void end_message() {
+            size_t last = end == 0 ? capacity - 1 : end - 1;
+            assert(buff[last] == ' ');
+            buff[last] = '\n';
+        }
+
+        bool flush() {
+            // Up to 2 subsequent writes: beg->capacity and end->beg
+            if (size == 0)
+                return true;
+            ssize_t res;
+            size_t total_written = 0;
+            if (beg < end) {
+                res = write(sock, buff + beg, size);
+                if (res < 0)
+                    syserr(errno, "write");
+                total_written += static_cast<size_t>(res);
+                if (static_cast<size_t>(res) < size) {
+                    size -= total_written;
+                    beg = (beg + total_written) % capacity;
+                    return false;
+                }
+            } else {
+                size_t first_portion = capacity - beg;
+                res = write(sock, buff + beg, first_portion);
+                if (res < 0)
+                    syserr(errno, "write");
+                total_written += static_cast<size_t>(res);
+                if (static_cast<size_t>(res) < first_portion) {
+                    size -= total_written;
+                    beg = (beg + total_written) % capacity;
+                    return false;
+                }
+
+                size_t second_portion = end;
+                res = write(sock, buff + beg, second_portion);
+                if (res < 0)
+                    syserr(errno, "write");
+                total_written += static_cast<size_t>(res);
+                if (static_cast<size_t>(res) < second_portion) {
+                    size -= total_written;
+                    beg = (beg + total_written) % capacity;
+                    return false;
+                }
+            }
+            assert(total_written == size);
+            // If we are here, the buffer has been emptied, so we can reset it.
+            beg = end = 0;
+            size = 0;
+            if (capacity > initial_capacity)
+                shrink();
+            return true;
+        }
+    };
+
+    class TCPReceiveBuffer {
+        int const sock;
+        char *buff;
+        size_t beg;
+        size_t end;
     };
 }
 
