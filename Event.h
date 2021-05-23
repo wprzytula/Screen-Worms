@@ -12,11 +12,34 @@ namespace Worms {
     class Crc32Mismatch : public std::exception {};
 
     struct Event {
+        struct Comparator {
+            using is_transparent = void;
+            bool operator()(Event const& e1, Event const& e2) const {
+                return e1.event_no < e2.event_no;
+            }
+        };
+        struct UniquePtrComparator {
+            using is_transparent = void;
+            bool operator()(std::unique_ptr<Event> const& ptr1,
+                    std::unique_ptr<Event> const& ptr2) const {
+                return ptr1->event_no < ptr2->event_no;
+            }
+        };
+
+        uint32_t len;
+        uint32_t event_no;
+        uint8_t event_type;
+
+        Event(uint32_t len, uint32_t event_no, uint8_t event_type)
+            : len(len), event_no(event_no), event_type(event_type) {}
+
         virtual ~Event() = default;
 
         [[nodiscard]] virtual size_t size() const = 0;
 
         virtual void pack(UDPSendBuffer& buff) = 0;
+
+        virtual void stringify(TCPSendBuffer& buff) = 0;
     };
 
     struct EventDataIface {
@@ -27,6 +50,10 @@ namespace Worms {
         virtual void add_to_crc32(Crc32Computer& crc32_computer) = 0;
 
         virtual void pack(UDPSendBuffer& buff) = 0;
+
+        virtual void stringify(TCPSendBuffer& buff) = 0;
+
+        virtual void pack_name(TCPSendBuffer& buff) = 0;
     };
 
     template<typename EventData>
@@ -34,20 +61,17 @@ namespace Worms {
         static_assert(std::is_base_of_v<EventDataIface, EventData>);
 //        static_assert(std::is_convertible_v<UDPReceiveBuffer&, EventData>);
 
-        uint32_t len;
-        uint32_t event_no;
-        uint8_t event_type;
         EventData event_data;
-        uint32_t crc32;
+        uint32_t crc32{};
 
         // Basic construction.
         EventImpl(uint32_t len, uint32_t event_no, uint8_t event_type, EventData data)
-            : len{len}, event_no{event_no}, event_type{event_type}, event_data{std::move(data)},
+            : Event{len, event_no, event_type}, event_data{std::move(data)},
               crc32{compute_crc32()} {}
 
         // Construction from UDPReceiveBuffer.
         EventImpl(uint32_t len, uint32_t event_no, uint8_t event_type, UDPReceiveBuffer& buff)
-            : len{len}, event_no{event_no}, event_type{event_type}, event_data{buff} {
+            : Event{len, event_no, event_type}, event_data{buff} {
                 buff.unpack_field(crc32);
                 if (crc32 != compute_crc32())
                     throw Crc32Mismatch{};
@@ -68,19 +92,20 @@ namespace Worms {
         };
 
         void pack(UDPSendBuffer& buff) override {
-            pack_header(buff);
-            event_data.pack(buff);
-            pack_crc(buff);
-        }
-
-    protected:
-        void pack_header(UDPSendBuffer& buff) {
             buff.pack_field(len);
             buff.pack_field(event_no);
             buff.pack_field(event_type);
-        }
-        void pack_crc(UDPSendBuffer& buff) {
+            event_data.pack(buff);
             buff.pack_field(crc32);
+        }
+
+        void stringify(TCPSendBuffer& buff) override {
+            event_data.pack_name();
+            buff.pack_word(std::to_string(len));
+            buff.pack_word(std::to_string(event_no));
+            buff.pack_word(std::to_string(event_type));
+            event_data.stringify(buff);
+            buff.end_message();
         }
     };
 
@@ -100,7 +125,13 @@ namespace Worms {
         explicit Data_NEW_GAME(UDPReceiveBuffer& buff) {
             buff.unpack_field(maxx);
             buff.unpack_field(maxy);
-            // TODO: players
+            while (!buff.exhausted()) {
+                try {
+                    players.push_back(buff.unpack_name());
+                } catch (UnendedName const&) {
+                    // TODO
+                }
+            }
         }
 
         [[nodiscard]] size_t size() const override {
@@ -121,12 +152,21 @@ namespace Worms {
         void pack(UDPSendBuffer& buff) override {
             buff.pack_field(maxx);
             buff.pack_field(maxy);
-            for (auto it = players.begin(); it != players.end(); ++it) {
-                buff.pack_string(*it);
-                if (std::next(it) != players.end())
-                    buff.pack_field(' ');
-                else
-                    buff.pack_field('\0');
+            for (auto const& player : players) {
+                buff.pack_string(player);
+                buff.pack_field('\0');
+            }
+        }
+
+        void pack_name(TCPSendBuffer &buff) override {
+            buff.pack_word("NEW_GAME");
+        }
+
+        void stringify(TCPSendBuffer &buff) override {
+            buff.pack_word(std::to_string(maxx));
+            buff.pack_word(std::to_string(maxy));
+            for (auto const& player : players) {
+                buff.pack_word(player);
             }
         }
     };
@@ -164,6 +204,16 @@ namespace Worms {
             buff.pack_field(x);
             buff.pack_field(y);
         }
+
+        void pack_name(TCPSendBuffer &buff) override {
+            buff.pack_word("PIXEL");
+        }
+
+        void stringify(TCPSendBuffer &buff) override {
+            buff.pack_word(std::to_string(player_number));
+            buff.pack_word(std::to_string(x));
+            buff.pack_word(std::to_string(y));
+        }
     };
 
     using Event_PIXEL = EventImpl<Data_PIXEL>;
@@ -190,6 +240,14 @@ namespace Worms {
         void pack(UDPSendBuffer& buff) override {
             buff.pack_field(player_number);
         }
+
+        void pack_name(TCPSendBuffer &buff) override {
+            buff.pack_word("PLAYER_ELIMINATED");
+        }
+
+        void stringify(TCPSendBuffer &buff) override {
+            buff.pack_word(std::to_string(player_number));
+        }
     };
 
     using Event_PLAYER_ELIMINATED = EventImpl<Data_PLAYER_ELIMINATED>;
@@ -206,41 +264,45 @@ namespace Worms {
         void add_to_crc32(Crc32Computer&) override {}
 
         void pack(UDPSendBuffer&) override {}
+
+        void pack_name(TCPSendBuffer &) override {}
+
+        void stringify(TCPSendBuffer &) override {}
     };
 
     using Event_GAME_OVER = EventImpl<Data_GAME_OVER>;
 
 
     /* Facilitates parsing incoming data. */
-    class EventParser {
+    inline std::unique_ptr<Event> unpack_event(UDPReceiveBuffer& buff) {
         uint32_t len;
         uint32_t event_no;
         uint8_t event_type;
 
-        std::unique_ptr<Event> unpack(UDPReceiveBuffer& buff) {
-            buff.unpack_field(len);
-            buff.unpack_field(event_no);
-            buff.unpack_field(event_type);
+        buff.unpack_field(len);
+        buff.unpack_field(event_no);
+        buff.unpack_field(event_type);
 
-            std::unique_ptr<Event> res;
+        std::unique_ptr<Event> res;
 
-            switch (event_type) {
-                case NEW_GAME_NUM:
-                    res = std::make_unique<Event_NEW_GAME>(len, event_no, event_type, buff);
-                    break;
-                case PIXEL_NUM:
-                    res = std::make_unique<Event_PIXEL>(len, event_no, event_type, buff);
-                    break;
-                case PLAYER_ELIMINATED_NUM:
-                    res = std::make_unique<Event_PLAYER_ELIMINATED>(len, event_no, event_type, buff);
-                    break;
-                case GAME_OVER_NUM:
-                    res = std::make_unique<Event_GAME_OVER>(len, event_no, event_type, buff);
-                    break;
-            }
-            return res;
+        switch (event_type) {
+            case NEW_GAME_NUM:
+                res = std::make_unique<Event_NEW_GAME>(len, event_no, event_type, buff);
+                break;
+            case PIXEL_NUM:
+                res = std::make_unique<Event_PIXEL>(len, event_no, event_type, buff);
+                break;
+            case PLAYER_ELIMINATED_NUM:
+                res = std::make_unique<Event_PLAYER_ELIMINATED>(len, event_no, event_type, buff);
+                break;
+            case GAME_OVER_NUM:
+                res = std::make_unique<Event_GAME_OVER>(len, event_no, event_type, buff);
+                break;
+            default:
+                assert(false);
         }
-    };
+        return res;
+    }
 }
 
 #endif //ROBAKI_EVENT_H
