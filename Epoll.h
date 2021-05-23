@@ -9,10 +9,13 @@ namespace Worms {
         using flags_t = unsigned int;
 
         int const epoll_fd;
+        int const timerfd;
         std::map<int, flags_t> watching;
 
     public:
-        Epoll() : epoll_fd{epoll_create(1)} {}
+        Epoll(int const timerfd) : epoll_fd{epoll_create(1)}, timerfd{timerfd} {
+            add_fd(timerfd);
+        }
 
         ~Epoll() {
             if (close(epoll_fd) != 0)
@@ -68,7 +71,7 @@ namespace Worms {
             modify_watching(fd);
         }
 
-        struct epoll_event wait(int const timerfd, int const timeout = -1) {
+        struct epoll_event wait(int const timeout = -1) {
             int max_events = static_cast<int>(watching.size());
             struct epoll_event events[max_events];
 

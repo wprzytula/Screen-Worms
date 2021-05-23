@@ -41,7 +41,7 @@ namespace Worms {
         RandomGenerator rand;
         GameConstants const constants;
         std::optional<Game> current_game;
-        std::queue<SendBuffer> send_queue;
+        std::queue<UDPSendBuffer> send_queue;
         std::set<PlayerID, PlayerID::Comparator> connected_players;
         int const round_timer;
     public:
