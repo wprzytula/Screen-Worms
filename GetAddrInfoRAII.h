@@ -10,11 +10,8 @@ namespace Worms {
         sockaddr_in6 _address{};
     public:
         GetAddrInfoRAII(int sock_type, char const *name, uint16_t port) {
-            int sock;
             struct addrinfo addr_hints{};
-            int i, flags, sflags, err;
-            size_t len;
-            socklen_t rcva_len;
+            int err;
 
             assert(sock_type == SOCK_DGRAM || sock_type == SOCK_STREAM);
 

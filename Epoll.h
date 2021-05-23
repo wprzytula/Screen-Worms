@@ -23,12 +23,12 @@ namespace Worms {
         }
 
         void add_fd(int const fd) {
-            assert(!watching.contains(fd));
+            assert(watching.find(fd) == watching.end());
             watching[fd] = 0;
             struct epoll_event events{
                 .events = 0,
                 .data{.fd = fd}
-            }
+            };
             verify(epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fd, &events),
                     "epoll add fd");
         }
@@ -44,29 +44,29 @@ namespace Worms {
 
     public:
         void watch_fd_for_input(int const fd) {
-            assert(watching.contains(fd));
+            assert(watching.find(fd) != watching.end());
             assert(!(watching[fd] & EPOLLIN));
             watching[fd] |= EPOLLIN;
             modify_watching(fd);
         }
 
         void stop_watching_fd_for_input(int const fd) {
-            assert(watching.contains(fd));
-            assert(watching[fd] & EPOLLIN));
+            assert(watching.find(fd) != watching.end());
+            assert(watching[fd] & EPOLLIN);
             watching[fd] &= ~EPOLLIN;
             modify_watching(fd);
         }
 
         void watch_fd_for_output(int const fd) {
-            assert(watching.contains(fd));
+            assert(watching.find(fd) != watching.end());
             assert(!(watching[fd] & EPOLLOUT));
             watching[fd] |= EPOLLOUT;
             modify_watching(fd);
         }
 
         void stop_watching_fd_for_output(int const fd) {
-            assert(watching.contains(fd));
-            assert(watching[fd] & EPOLLOUT));
+            assert(watching.find(fd) != watching.end());
+            assert(watching[fd] & EPOLLOUT);
             watching[fd] &= ~EPOLLOUT;
             modify_watching(fd);
         }

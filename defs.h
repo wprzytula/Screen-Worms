@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cstring>
 
+#include <memory>
 #include <chrono>
 #include <string>
 #include <vector>
