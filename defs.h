@@ -19,10 +19,4 @@
 
 #include "err.h"
 
-
-namespace Worms {
-    using timestamp_t = std::chrono::time_point<std::chrono::system_clock,
-        std::chrono::microseconds>;
-}
-
 #endif //ROBAKI_DEFS_H
