@@ -28,8 +28,7 @@ namespace Worms {
         double x;
         double y;
     public:
-        Position(uint32_t x, uint32_t y)
-        : x{static_cast<double>(x)}, y{static_cast<double>(y)} {}
+        Position(double x, double y): x{x}, y{y} {}
 
         void move_with_angle(angle_t angle) {
             x += std::cos(angle.value());

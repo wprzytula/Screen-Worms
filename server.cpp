@@ -5,6 +5,7 @@
 #include <queue>
 #include <set>
 #include <utility>
+#include <algorithm>
 
 #include "err.h"
 #include "Event.h"
@@ -19,14 +20,81 @@
 namespace Worms {
     class Game {
     private:
+        GameConstants constants;
         Board board;
+        RandomGenerator& rand;
+        uint32_t const game_id;
         std::vector<std::unique_ptr<Event const>> events;
-        std::vector<PlayerInGame> players;
-//        std::set<ClientData> connected;
-        uint32_t round_no;
-
+        std::vector<std::shared_ptr<Player>> players;
+        std::set<std::shared_ptr<ClientData>> observers;
     public:
-        explicit Game(GameConstants const& constants) : board{constants}, round_no{0} {}
+        Game(GameConstants constants, RandomGenerator& rand, std::set<std::shared_ptr<Player>> const& ready_players,
+             std::set<std::shared_ptr<ClientData>> observers)
+            : constants{constants}, board{constants}, rand{rand}, game_id{rand()},
+              observers{std::move(observers)} {
+            for (auto& player: ready_players) {
+                players.push_back(player);
+            }
+            std::sort(players.begin(), players.end(),
+                      [](std::shared_ptr<Player> const& p1,
+                         std::shared_ptr<Player> const& p2){
+                return p1->player_name < p2->player_name;
+            });
+
+            {   // generate NEW_GAME
+                std::vector<std::string> player_names;
+                player_names.resize(players.size());
+                for (size_t i = 0; i < players.size(); ++i) {
+                    player_names[i] = players[i]->player_name;
+                }
+                generate_event(NEW_GAME_NUM, std::make_unique<Data_NEW_GAME>(
+                        constants.width, constants.height, std::move(player_names)));
+            }
+            for (size_t i = 0; i < players.size(); ++i) {
+                auto& player = players[i];
+                player->position.emplace(rand() % constants.width + 0.5,
+                                         rand() % constants.height + 0.5);
+                player->angle = rand() % 360;
+                auto player_pixel = player->position->as_pixel();
+                if (board.is_eaten(player_pixel)) {
+                    generate_event(PLAYER_ELIMINATED_NUM,
+                                   std::make_unique<Data_PLAYER_ELIMINATED>(i));
+                } else {
+                    board.eat(player_pixel);
+                    generate_event(PIXEL_NUM,std::make_unique<Data_PIXEL>(
+                            i, player_pixel.x, player_pixel.y));
+                }
+            }
+        }
+
+        void generate_event(uint8_t event_type, std::unique_ptr<EventDataIface> data) {
+            uint32_t event_no = events.size();
+            std::unique_ptr<Event> event;
+
+            switch (event_type) {
+                case NEW_GAME_NUM: {
+                    event = std::make_unique<Event_NEW_GAME>(
+                            event_no, event_type, *(dynamic_cast<Data_NEW_GAME*>(data.get())));
+                    break;
+                }
+                case PIXEL_NUM: {
+                    event = std::make_unique<Event_PIXEL>(
+                            event_no, event_type, *(dynamic_cast<Data_PIXEL*>(data.get())));
+                    break;
+                }
+                case PLAYER_ELIMINATED_NUM:
+                    event = std::make_unique<Event_PLAYER_ELIMINATED>(
+                            event_no, event_type, *(dynamic_cast<Data_PLAYER_ELIMINATED*>(data.get())));
+                    break;
+                case GAME_OVER_NUM:
+                    event = std::make_unique<Event_GAME_OVER>(
+                            event_no, event_type, *(dynamic_cast<Data_GAME_OVER*>(data.get())));
+                    break;
+                default:
+                    assert(false);
+            }
+            events.push_back(std::move(event));
+        }
     };
 
     class Server {
@@ -45,6 +113,7 @@ namespace Worms {
 
         std::set<ClientData, ClientData::Comparator> connected_players;
         std::set<std::string> player_names;
+
     public:
         explicit Server(uint16_t const port, uint32_t const seed, GameConstants constants)
                 : port{port},
@@ -86,6 +155,7 @@ namespace Worms {
                 }
             }
             for (auto it : to_disconnect) {
+//                it->
                 connected_players.erase(it);
             }
         }
@@ -123,6 +193,7 @@ namespace Worms {
 
                 } else {
                     client->last_heartbeat_round_no = round_no;
+
                 }
             }
 

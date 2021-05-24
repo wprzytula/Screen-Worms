@@ -57,9 +57,10 @@ namespace Worms {
         uint32_t crc32{};
 
         // Basic construction.
-        EventImpl(uint32_t len, uint32_t event_no, uint8_t event_type, EventData data)
-            : Event{len, event_no, event_type}, event_data{std::move(data)},
-              crc32{compute_crc32()} {}
+        EventImpl(uint32_t event_no, uint8_t event_type, EventData data)
+            : Event{static_cast<uint32_t>(sizeof(event_no) + sizeof(event_type) + data.size()),
+                    event_no, event_type},
+              event_data{std::move(data)}, crc32{compute_crc32()} {}
 
         // Construction from UDPReceiveBuffer.
         EventImpl(uint32_t len, uint32_t event_no, uint8_t event_type, UDPReceiveBuffer& buff)
@@ -112,7 +113,7 @@ namespace Worms {
         Data_NEW_GAME(uint32_t maxx, uint32_t maxy, std::vector<std::string> players)
             : maxx{maxx}, maxy{maxy}, players{std::move(players)} {}
 
-        explicit Data_NEW_GAME(UDPReceiveBuffer& buff, uint32_t len) {
+        Data_NEW_GAME(UDPReceiveBuffer& buff, uint32_t len) {
             buff.unpack_field(maxx);
             buff.unpack_field(maxy);
 
@@ -178,7 +179,7 @@ namespace Worms {
         Data_PIXEL(uint8_t playerNumber, uint32_t x, uint32_t y)
             : player_number{playerNumber}, x{x}, y{y} {}
 
-        explicit Data_PIXEL(UDPReceiveBuffer& buff, uint32_t) {
+        Data_PIXEL(UDPReceiveBuffer& buff, uint32_t) {
             buff.unpack_field(player_number);
             buff.unpack_field(x);
             buff.unpack_field(y);
@@ -220,7 +221,7 @@ namespace Worms {
 
         explicit Data_PLAYER_ELIMINATED(uint8_t player_number) : player_number{player_number} {}
 
-        explicit Data_PLAYER_ELIMINATED(UDPReceiveBuffer& buff, uint32_t) {
+        Data_PLAYER_ELIMINATED(UDPReceiveBuffer& buff, uint32_t) {
             buff.unpack_field(player_number);
         }
 
@@ -250,7 +251,7 @@ namespace Worms {
     /* GAME_OVER */
     constexpr uint8_t const GAME_OVER_NUM = 3;
     struct Data_GAME_OVER : public EventDataIface {
-        explicit Data_GAME_OVER(UDPReceiveBuffer&, uint32_t) {}
+        Data_GAME_OVER(UDPReceiveBuffer&, uint32_t) {}
 
         [[nodiscard]] size_t size() const override {
             return 0;

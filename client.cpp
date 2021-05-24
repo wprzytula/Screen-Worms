@@ -43,8 +43,8 @@ namespace Worms {
             : session_id{static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                       std::chrono::system_clock::now().time_since_epoch()).count())},
               player_name{std::move(player_name)},
-              server_sock{getaddrinfo_sock_factory(SOCK_DGRAM, game_server, server_port)},
-              iface_sock{getaddrinfo_sock_factory(SOCK_STREAM, game_iface, iface_port)},
+              server_sock{gai_sock_factory(SOCK_DGRAM, game_server, server_port)},
+              iface_sock{gai_sock_factory(SOCK_STREAM, game_iface, iface_port)},
               heartbeat_timer{timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK)},
               epoll{heartbeat_timer},
               server_send_buff{server_sock},
@@ -129,7 +129,7 @@ namespace Worms {
                         next_expected_event_no = 0;
                     } else {
                         if (event->event_type == NEW_GAME_NUM)
-                            players = dynamic_cast<Event_NEW_GAME*>(&*event)->event_data.players;
+                            players = dynamic_cast<Event_NEW_GAME*>(event.get())->event_data.players;
                         event->stringify(iface_send_buff, players);
                     }
                 } else if (event->event_no > next_expected_event_no) {

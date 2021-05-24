@@ -2,7 +2,7 @@
 #include "defs.h"
 
 namespace Worms {
-    int getaddrinfo_sock_factory(int sock_type, char const *name, uint16_t port) {
+    int gai_sock_factory(int sock_type, char const *name, uint16_t port) {
         struct addrinfo *addr_result{};
         struct sockaddr_in6 _address{};
         struct addrinfo addr_hints{};

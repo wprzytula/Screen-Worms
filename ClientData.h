@@ -21,18 +21,19 @@ namespace Worms {
             }
         };
 
+
         sockaddr_in6 const address;
         uint64_t mutable session_id;
         uint64_t mutable last_heartbeat_round_no;
 
-        bool operator==(ClientData const &p2) const {
+        /*bool operator==(ClientData const &p2) const {
             Comparator cmp;
             return !cmp(*this, p2) && !cmp(p2, *this);
         }
 
         bool operator!=(ClientData const &p2) const {
             return !(*this == p2);
-        }
+        }*/
     };
 }
 

@@ -5,43 +5,27 @@
 #include "ClientData.h"
 
 namespace Worms {
-    class PlayerWaiting {
+    class Player {
     public:
         struct Comparator {
             using is_transparent = void;
 
-            bool operator()(PlayerWaiting const &p1, PlayerWaiting const &p2) const {
-                return ClientData::Comparator()(p1.id, p2.id);
+            bool operator()(Player const &p1, Player const &p2) const {
+                return ClientData::Comparator()(*p1.client, *p2.client);
             }
         };
-
-        ClientData &id;
-        uint8_t mutable turn_direction;
+        std::shared_ptr<ClientData> client;
+        std::string const& player_name;
         bool mutable ready = false;
-
-        PlayerWaiting(ClientData &id, uint8_t turn_direction)
-                : id{id}, turn_direction{turn_direction} {}
-    };
-
-    class PlayerInGame {
-    public:
-        struct Comparator {
-            using is_transparent = void;
-
-            bool operator()(PlayerInGame const &p1, PlayerInGame const &p2) const {
-                return ClientData::Comparator()(*p1.id, *p2.id);
-            }
-        };
-
-        ClientData *id;
-        uint8_t turn_direction;
-        Position position;
+        uint8_t mutable turn_direction;
+        std::optional<Position> position;
         angle_t angle;
 
-        PlayerInGame(ClientData &id, uint8_t turn_direction, uint32_t x,
-                     uint32_t y, angle_t angle)
-                : id{&id}, turn_direction{turn_direction},
-                  position{x, y}, angle{angle} {}
+        Player(ClientData &id, std::string const& player_name, uint8_t turn_direction,
+               uint32_t x, uint32_t y, angle_t angle)
+                : player_name{player_name}, turn_direction{turn_direction},
+                  /*position{x, y}, */angle{angle} {
+        }
     };
 }
 

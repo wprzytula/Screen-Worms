@@ -21,7 +21,7 @@
 #include "err.h"
 
 namespace Worms {
-    int getaddrinfo_sock_factory(int sock_type, char const *name, uint16_t port);
+    int gai_sock_factory(int sock_type, char const *name, uint16_t port);
 
     template<typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
     inline T htobe(T field) {
