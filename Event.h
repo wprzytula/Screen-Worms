@@ -14,12 +14,6 @@ namespace Worms {
     struct Event {
         struct Comparator {
             using is_transparent = void;
-            bool operator()(Event const& e1, Event const& e2) const {
-                return e1.event_no < e2.event_no;
-            }
-        };
-        struct UniquePtrComparator {
-            using is_transparent = void;
             bool operator()(std::unique_ptr<Event> const& ptr1,
                     std::unique_ptr<Event> const& ptr2) const {
                 return ptr1->event_no < ptr2->event_no;
@@ -39,7 +33,7 @@ namespace Worms {
 
         virtual void pack(UDPSendBuffer& buff) = 0;
 
-        virtual void stringify(TCPSendBuffer& buff) = 0;
+        virtual void stringify(TCPSendBuffer& buff, std::vector<std::string> const& players) = 0;
     };
 
     struct EventDataIface {
@@ -47,19 +41,17 @@ namespace Worms {
 
         [[nodiscard]] virtual size_t size() const = 0;
 
-        virtual void add_to_crc32(Crc32Computer& crc32_computer) = 0;
+        virtual void add_to_crc32(Crc32Computer& crc32_computer) const = 0;
 
         virtual void pack(UDPSendBuffer& buff) = 0;
 
-        virtual void stringify(TCPSendBuffer& buff) = 0;
+        virtual void stringify(TCPSendBuffer& buff, std::vector<std::string> const& players) = 0;
 
         virtual void pack_name(TCPSendBuffer& buff) = 0;
     };
 
-    template<typename EventData>
+    template<typename EventData, typename = std::enable_if_t<std::is_base_of_v<EventDataIface, EventData>>>
     struct EventImpl : public Event {
-        static_assert(std::is_base_of_v<EventDataIface, EventData>);
-//        static_assert(std::is_convertible_v<UDPReceiveBuffer&, EventData>);
 
         EventData event_data;
         uint32_t crc32{};
@@ -71,7 +63,8 @@ namespace Worms {
 
         // Construction from UDPReceiveBuffer.
         EventImpl(uint32_t len, uint32_t event_no, uint8_t event_type, UDPReceiveBuffer& buff)
-            : Event{len, event_no, event_type}, event_data{buff} {
+            : Event{len, event_no, event_type},
+              event_data{buff, len - static_cast<uint32_t>(sizeof(event_no) + sizeof(event_type))} {
                 buff.unpack_field(crc32);
                 if (crc32 != compute_crc32())
                     throw Crc32Mismatch{};
@@ -82,11 +75,11 @@ namespace Worms {
                     event_data.size() + sizeof(crc32);
         }
 
-        crc32_t compute_crc32() {
+        [[nodiscard]] crc32_t compute_crc32() const {
             Crc32Computer crc32_computer;
-            crc32_computer.add(len);
-            crc32_computer.add(event_no);
-            crc32_computer.add(event_type);
+            crc32_computer.add(htobe(len));
+            crc32_computer.add(htobe(event_no));
+            crc32_computer.add(htobe(event_type));
             event_data.add_to_crc32(crc32_computer);
             return crc32_computer.value();
         };
@@ -99,12 +92,9 @@ namespace Worms {
             buff.pack_field(crc32);
         }
 
-        void stringify(TCPSendBuffer& buff) override {
-            event_data.pack_name();
-            buff.pack_word(std::to_string(len));
-            buff.pack_word(std::to_string(event_no));
-            buff.pack_word(std::to_string(event_type));
-            event_data.stringify(buff);
+        void stringify(TCPSendBuffer& buff, std::vector<std::string> const& players) override {
+            event_data.pack_name(buff);
+            event_data.stringify(buff, players);
             buff.end_message();
         }
     };
@@ -122,15 +112,18 @@ namespace Worms {
         Data_NEW_GAME(uint32_t maxx, uint32_t maxy, std::vector<std::string> players)
             : maxx{maxx}, maxy{maxy}, players{std::move(players)} {}
 
-        explicit Data_NEW_GAME(UDPReceiveBuffer& buff) {
+        explicit Data_NEW_GAME(UDPReceiveBuffer& buff, uint32_t len) {
             buff.unpack_field(maxx);
             buff.unpack_field(maxy);
-            while (!buff.exhausted()) {
-                try {
+
+            len -= sizeof(maxx) + sizeof(maxy);
+            try {
+                while (len > 0) {
                     players.push_back(buff.unpack_name());
-                } catch (UnendedName const&) {
-                    // TODO
+                    len -= players[players.size() - 1].size() + 1;
                 }
+            } catch (/*UnendedName*/std::bad_alloc const&) {
+                // TODO
             }
         }
 
@@ -142,11 +135,13 @@ namespace Worms {
                     });
         }
 
-        void add_to_crc32(Crc32Computer& crc32_computer) override {
-            crc32_computer.add(maxx);
-            crc32_computer.add(maxy);
-            for (auto const& player: players)
+        void add_to_crc32(Crc32Computer& crc32_computer) const override {
+            crc32_computer.add(htobe(maxx));
+            crc32_computer.add(htobe(maxy));
+            for (auto const& player: players) {
                 crc32_computer.add(player);
+                crc32_computer.add('\0');
+            }
         }
 
         void pack(UDPSendBuffer& buff) override {
@@ -162,7 +157,7 @@ namespace Worms {
             buff.pack_word("NEW_GAME");
         }
 
-        void stringify(TCPSendBuffer &buff) override {
+        void stringify(TCPSendBuffer &buff, std::vector<std::string> const&) override {
             buff.pack_word(std::to_string(maxx));
             buff.pack_word(std::to_string(maxy));
             for (auto const& player : players) {
@@ -183,20 +178,20 @@ namespace Worms {
         Data_PIXEL(uint8_t playerNumber, uint32_t x, uint32_t y)
             : player_number{playerNumber}, x{x}, y{y} {}
 
-        explicit Data_PIXEL(UDPReceiveBuffer& receive_buffer) {
-            receive_buffer.unpack_field(player_number);
-            receive_buffer.unpack_field(x);
-            receive_buffer.unpack_field(y);
+        explicit Data_PIXEL(UDPReceiveBuffer& buff, uint32_t) {
+            buff.unpack_field(player_number);
+            buff.unpack_field(x);
+            buff.unpack_field(y);
         }
 
         [[nodiscard]] size_t size() const override {
             return sizeof(player_number) + sizeof(x) + sizeof(y);
         }
 
-        void add_to_crc32(Crc32Computer& crc32_computer) override {
-            crc32_computer.add(player_number);
-            crc32_computer.add(x);
-            crc32_computer.add(y);
+        void add_to_crc32(Crc32Computer& crc32_computer) const override {
+            crc32_computer.add(htobe(player_number));
+            crc32_computer.add(htobe(x));
+            crc32_computer.add(htobe(y));
         }
 
         void pack(UDPSendBuffer& buff) override {
@@ -209,10 +204,10 @@ namespace Worms {
             buff.pack_word("PIXEL");
         }
 
-        void stringify(TCPSendBuffer &buff) override {
-            buff.pack_word(std::to_string(player_number));
+        void stringify(TCPSendBuffer &buff, std::vector<std::string> const& players) override {
             buff.pack_word(std::to_string(x));
             buff.pack_word(std::to_string(y));
+            buff.pack_word(players[player_number]);
         }
     };
 
@@ -225,16 +220,16 @@ namespace Worms {
 
         explicit Data_PLAYER_ELIMINATED(uint8_t player_number) : player_number{player_number} {}
 
-        explicit Data_PLAYER_ELIMINATED(UDPReceiveBuffer& receive_buffer) {
-            receive_buffer.unpack_field(player_number);
+        explicit Data_PLAYER_ELIMINATED(UDPReceiveBuffer& buff, uint32_t) {
+            buff.unpack_field(player_number);
         }
 
         [[nodiscard]] size_t size() const override {
             return sizeof(player_number);
         }
 
-        void add_to_crc32(Crc32Computer& crc32_computer) override {
-            crc32_computer.add(player_number);
+        void add_to_crc32(Crc32Computer& crc32_computer) const override {
+            crc32_computer.add(htobe(player_number));
         }
 
         void pack(UDPSendBuffer& buff) override {
@@ -245,8 +240,8 @@ namespace Worms {
             buff.pack_word("PLAYER_ELIMINATED");
         }
 
-        void stringify(TCPSendBuffer &buff) override {
-            buff.pack_word(std::to_string(player_number));
+        void stringify(TCPSendBuffer &buff, std::vector<std::string> const& players) override {
+            buff.pack_word(players[player_number]);
         }
     };
 
@@ -255,19 +250,19 @@ namespace Worms {
     /* GAME_OVER */
     constexpr uint8_t const GAME_OVER_NUM = 3;
     struct Data_GAME_OVER : public EventDataIface {
-        explicit Data_GAME_OVER(UDPReceiveBuffer&) {}
+        explicit Data_GAME_OVER(UDPReceiveBuffer&, uint32_t) {}
 
         [[nodiscard]] size_t size() const override {
             return 0;
         }
 
-        void add_to_crc32(Crc32Computer&) override {}
+        void add_to_crc32(Crc32Computer&) const override {}
 
         void pack(UDPSendBuffer&) override {}
 
         void pack_name(TCPSendBuffer &) override {}
 
-        void stringify(TCPSendBuffer &) override {}
+        void stringify(TCPSendBuffer &, std::vector<std::string> const&) override {}
     };
 
     using Event_GAME_OVER = EventImpl<Data_GAME_OVER>;

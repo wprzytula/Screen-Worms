@@ -7,13 +7,12 @@
 #include "Buffer.h"
 
 namespace Worms {
-    class ClientHeartbeat {
+    struct ClientHeartbeat {
         uint64_t session_id{};
         uint8_t turn_direction{};
         uint32_t next_expected_event_no{};
         std::string player_name;
 
-    public:
         ClientHeartbeat(uint64_t session_id, uint8_t turn_direction,
                         uint32_t next_expected_event_no, std::string player_name)
                 : session_id{session_id}, turn_direction{turn_direction},
@@ -27,7 +26,7 @@ namespace Worms {
             buff.unpack_remaining(player_name);
         }
 
-        void pack(UDPSendBuffer &buff) {
+        void pack(UDPSendBuffer &buff) const {
             buff.pack_field(session_id);
             buff.pack_field(turn_direction);
             buff.pack_field(next_expected_event_no);

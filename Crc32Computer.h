@@ -8,6 +8,7 @@ namespace Worms {
     public:
         using crc32_t = uint32_t;
     private:
+        static uint32_t const mask = 0xFFFFFFFF;
         static constexpr crc32_t const crc_table[256]{
                 0x00000000u, 0x77073096u, 0xee0e612cu, 0x990951bau, 0x076dc419u,
                 0x706af48fu, 0xe963a535u, 0x9e6495a3u, 0x0edb8832u, 0x79dcb8a4u,
@@ -64,11 +65,10 @@ namespace Worms {
         };
         crc32_t crc32;
     public:
-        Crc32Computer() : crc32{0xFFFFFFFF} {}
+        Crc32Computer() : crc32{mask} {}
 
-        template<typename T>
+        template<typename T, typename = std::enable_if<std::is_arithmetic_v<T>>>
         void add(T const &data) {
-            static_assert(std::is_trivial_v < T > );
 
             auto const *data_ptr = reinterpret_cast<uint8_t const *>(&data);
             size_t const len = sizeof(T) / sizeof(uint8_t);
@@ -80,7 +80,7 @@ namespace Worms {
         }
 
         [[nodiscard]] crc32_t value() const {
-            return crc32;
+            return crc32 ^ mask;
         }
     };
 
@@ -91,8 +91,6 @@ namespace Worms {
             crc32 = (crc32 >> 8) ^ crc_table[lookup_index];
         }
     }
-
-
     using crc32_t = Crc32Computer::crc32_t;
 }
 

@@ -13,7 +13,7 @@ namespace Worms {
         std::map<int, flags_t> watching;
 
     public:
-        Epoll(int const timerfd) : epoll_fd{epoll_create(1)}, timerfd{timerfd} {
+        explicit Epoll(int const timerfd) : epoll_fd{epoll_create(1)}, timerfd{timerfd} {
             add_fd(timerfd);
         }
 
@@ -59,7 +59,9 @@ namespace Worms {
 
         void watch_fd_for_output(int const fd) {
             assert(watching.find(fd) != watching.end());
-            assert(!(watching[fd] & EPOLLOUT));
+//            assert(!(watching[fd] & EPOLLOUT));
+            if (watching[fd] & EPOLLOUT)
+                return;
             watching[fd] |= EPOLLOUT;
             modify_watching(fd);
         }

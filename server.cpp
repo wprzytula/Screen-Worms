@@ -4,6 +4,7 @@
 #include <sys/fcntl.h>
 #include <queue>
 #include <set>
+#include <utility>
 
 #include "err.h"
 #include "Event.h"
@@ -12,28 +13,16 @@
 #include "GameConstants.h"
 #include "Board.h"
 #include "Epoll.h"
+#include "ClientHeartbeat.h"
+#include "Player.h"
 
 namespace Worms {
-    class Player {
-    public:
-        struct Comparator {
-            using is_transparent = void;
-
-            bool operator()(Player const &p1, Player const &p2) const {
-                return PlayerID::Comparator()(p1.id, p2.id);
-            }
-        };
-        PlayerID id;
-        uint8_t mutable turn_direction;
-        uint64_t mutable last_heartbeat_round_no;
-    };
-
     class Game {
     private:
         Board board;
         std::vector<std::unique_ptr<Event const>> events;
-        std::vector<Player> players;
-        std::set<PlayerID> connected;
+        std::vector<PlayerInGame> players;
+//        std::set<ClientData> connected;
         uint32_t round_no;
 
     public:
@@ -52,7 +41,10 @@ namespace Worms {
         uint64_t const round_duration_ns;
         std::optional<Game> current_game;
         std::queue<UDPSendBuffer> send_queue;
-        std::set<Player, Player::Comparator> connected_players;
+        UDPReceiveBuffer receive_buff{sock};
+
+        std::set<ClientData, ClientData::Comparator> connected_players;
+        std::set<std::string> player_names;
     public:
         explicit Server(uint16_t const port, uint32_t const seed, GameConstants constants)
                 : port{port},
@@ -72,7 +64,7 @@ namespace Worms {
 
             server_address.sin6_family = AF_INET6;
             server_address.sin6_addr = in6addr_any;
-            server_address.sin6_port = htobe16(port);
+            server_address.sin6_port = htobe(port);
 
             verify(bind(sock, (struct sockaddr *) &server_address,
                         sizeof(server_address)), "bind");
@@ -87,10 +79,14 @@ namespace Worms {
         }
     private:
         void disconnect_idles() {
+            std::vector<typeof(connected_players.begin())> to_disconnect;
             for (auto it = connected_players.begin(); it != connected_players.end(); ++it) {
                 if ((round_no - it->last_heartbeat_round_no) * round_duration_ns >= 2'000'000'000) {
-                    connected_players.erase(it);
+                    to_disconnect.push_back(it);
                 }
+            }
+            for (auto it : to_disconnect) {
+                connected_players.erase(it);
             }
         }
 
@@ -110,6 +106,29 @@ namespace Worms {
         }
 
         void handle_heartbeat() {
+            auto sender = receive_buff.populate();
+            ClientHeartbeat heartbeat{receive_buff};
+
+            if (connected_players.find(sender) == connected_players.end()) {
+                if (player_names.find(heartbeat.player_name) == player_names.end()) {
+                    connect_client();
+                } else {
+                    // discard, ignore, annihilate!
+                }
+            } else {
+                auto const& client = connected_players.find(sender);
+                if (client->session_id < heartbeat.session_id) {
+                    // discard, ignore, annihilate!
+                } else if (client->session_id > heartbeat.session_id) {
+
+                } else {
+                    client->last_heartbeat_round_no = round_no;
+                }
+            }
+
+        }
+
+        void connect_client() {
 
         }
 
@@ -125,7 +144,12 @@ namespace Worms {
                 event = epoll.wait();
                 if (event.data.fd == round_timer) {
                     disconnect_idles();
-                    play_round();
+                    uint64_t expirations;
+                    verify(read(round_timer, &expirations, sizeof(expirations)),
+                           "read timerfd");
+                    for (size_t i = 0; i < expirations; ++i) {
+                        play_round();
+                    }
                 } else if (event.events & EPOLLOUT) {
                     // drain server queue
                     if (drain_queue()) // if no delay this time

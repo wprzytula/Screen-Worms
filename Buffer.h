@@ -16,9 +16,11 @@ namespace Worms {
         UDPEndpoint(int const sock, sockaddr_in6 const &addr)
                 : sock{sock}, _address{addr}, addr_len{sizeof(sockaddr_in6)} {}
 
-        UDPEndpoint(int const sock, void *buff) : sock{sock} {
-            verify(recvfrom(sock, buff, MAX_DATA_SIZE, 0, reinterpret_cast<sockaddr*>(&_address),
-                            &addr_len), "recvfrom");
+        UDPEndpoint(int const sock, void *buff, size_t& size) : sock{sock} {
+            ssize_t res = recvfrom(sock, buff, MAX_DATA_SIZE, 0, reinterpret_cast<sockaddr*>(&_address),
+                            &addr_len);
+            verify(res, "recvfrom");
+            size = res;
         }
 
         [[nodiscard]] sockaddr_in6 address() const {
@@ -36,11 +38,11 @@ namespace Worms {
     private:
         char buff[MAX_DATA_SIZE] = {0};
         uint16_t _size;
-        UDPEndpoint const receiver;
+        int const receiver_sock;
 
     public:
-        explicit UDPSendBuffer(UDPEndpoint receiver)
-                : _size{0}, receiver{receiver} {}
+        explicit UDPSendBuffer(int receiver)
+                : _size{0}, receiver_sock{receiver} {}
 
         ~UDPSendBuffer() {
             assert(_size == 0);
@@ -59,12 +61,11 @@ namespace Worms {
         }
 
         bool flush() {
-            ssize_t res = receiver.sendthere(buff, _size);
-            fprintf(stderr, "Sent %ld bytes\n", res);
+            ssize_t res = send(receiver_sock, buff, _size, 0);
+//            fprintf(stderr, "Sent %ld bytes\n", res);
             if (res == -1) {
-//                fprintf(stderr, "%d: %s\n", errno, strerror(errno));
                 if (!(errno == EAGAIN || errno == EWOULDBLOCK))
-                    syserr(errno, "cannot send to remote host");
+                    syserr(errno, "cannot send to remote host (UDP)");
                 return false;
             } else {
                 assert(_size == res);
@@ -75,23 +76,8 @@ namespace Worms {
         template<typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
         void pack_field(T field) {
             assert(remaining() >= sizeof(T));
-            switch (sizeof(T)) {
-                case 1:
-                    break;
-                case 2:
-                    field = htobe16(field);
-                    break;
-                case 4:
-                    field = htobe32(field);
-                    break;
-                case 8:
-                    field = htobe64(field);
-                    break;
-                default: // unsupported field size
-                    assert(false);
-                    break;
-            }
-            *((T*)buff + _size) = field;
+            field = htobe(field);
+            *((T*)(buff + _size)) = field;
             _size += sizeof(T);
         }
         void pack_string(std::string const& s) {
@@ -107,15 +93,21 @@ namespace Worms {
     private:
         int const sock;
         char buff[MAX_DATA_SIZE]{};
-        uint16_t size;
-        uint16_t pos;
+        size_t size;
+        size_t pos;
         std::optional<UDPEndpoint> sender;
 
     public:
         explicit UDPReceiveBuffer(int const sock) : sock{sock}, size{0}, pos{0} {}
 
+        [[nodiscard]] bool exhausted() const {
+            return pos == size;
+        }
+
         sockaddr_in6 populate() {
-            sender.emplace(sock, buff);
+            assert(exhausted());
+            size = pos = 0;
+            sender.emplace(sock, buff, size);
             return sender.value().address();
         }
 
@@ -126,27 +118,9 @@ namespace Worms {
         template<typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
         void unpack_field(T& field) {
             assert(remaining() >= sizeof(T));
-            field = *((T*)buff + pos);
+            field = *((T*)(buff + pos));
             pos += sizeof(T);
-            switch (sizeof(T)) {
-                case 1:
-                    break;
-                case 2:
-                    field = be16toh(field);
-                    break;
-                case 4:
-                    field = be32toh(field);
-                    break;
-                case 8:
-                    field = be64toh(field);
-                    break;
-                default: // unsupported field size
-                    assert(false);
-            }
-        }
-
-        [[nodiscard]] bool exhausted() const {
-            return pos == size;
+            field = betoh(field);
         }
 
         std::string unpack_name() {
@@ -227,11 +201,15 @@ namespace Worms {
 
         bool flush() {
             // Up to 2 subsequent writes: beg->capacity and end->beg
+            printf("\nIface send buffer contains:\n");
             if (size == 0)
                 return true;
             ssize_t res;
             size_t total_written = 0;
             if (beg < end) {
+                for (size_t i = beg; i < end; ++i) {
+                    putchar_unlocked(buff[i]);
+                }
                 res = write(sock, buff + beg, size);
                 if (res < 0)
                     syserr(errno, "write");
@@ -239,9 +217,13 @@ namespace Worms {
                 if (static_cast<size_t>(res) < size) {
                     size -= total_written;
                     beg = (beg + total_written) % capacity;
+                    putchar_unlocked('\n');
                     return false;
                 }
             } else {
+                for (size_t i = beg; i < capacity; ++i) {
+                    putchar_unlocked(buff[i]);
+                }
                 size_t first_portion = capacity - beg;
                 res = write(sock, buff + beg, first_portion);
                 if (res < 0)
@@ -250,9 +232,13 @@ namespace Worms {
                 if (static_cast<size_t>(res) < first_portion) {
                     size -= total_written;
                     beg = (beg + total_written) % capacity;
+                    putchar_unlocked('\n');
                     return false;
                 }
 
+                for (size_t i = 0; i < end; ++i) {
+                    putchar_unlocked(buff[i]);
+                }
                 size_t second_portion = end;
                 res = write(sock, buff + beg, second_portion);
                 if (res < 0)
@@ -261,9 +247,11 @@ namespace Worms {
                 if (static_cast<size_t>(res) < second_portion) {
                     size -= total_written;
                     beg = (beg + total_written) % capacity;
+                    putchar_unlocked('\n');
                     return false;
                 }
             }
+            putchar_unlocked('\n');
             assert(total_written == size);
             // If we are here, the buffer has been emptied, so we can reset it.
             beg = end = 0;
@@ -277,6 +265,7 @@ namespace Worms {
     class TCPReceiveBuffer {
         static constexpr size_t const TCP_BUFF_SIZE = 256;
         static size_t const max_line_len = strlen("RIGHT_KEY_DOWN\n");
+        static size_t const min_line_len = strlen("LEFT_KEY_UP\n");
         int const sock;
         char buff[TCP_BUFF_SIZE]{};
         size_t beg;
@@ -285,7 +274,12 @@ namespace Worms {
         explicit TCPReceiveBuffer(int const sock) : sock{sock}, beg{0}, end{0} {}
 
         [[nodiscard]] bool has_data() const {
-            return end - beg >= max_line_len;
+            return end - beg >= max_line_len ||
+                (end - beg >= min_line_len && (
+                    buff[beg + min_line_len - 1] == '\n' ||
+                    buff[beg + min_line_len] == '\n' ||
+                    buff[beg + min_line_len + 1] == '\n')
+                );
         }
 
         uint8_t fetch_next() {
@@ -299,13 +293,14 @@ namespace Worms {
             assert(has_data());
 
             for (size_t i = 0; i < sizeof(messages) / sizeof(char const *); ++i) {
-                if (strncmp(buff + beg, messages[i], messages_len[i]) == 0) {
+                if (strncmp(buff + beg, messages[i], std::min(messages_len[i], end - beg)) == 0) {
                     beg += messages_len[i];
+                    printf("Received from iface: %s", messages[i]);
                     return turn_direction[i];
                 }
             }
             fatal("Invalid message received from interface!");
-//            return 3;
+            return 3;
         }
 
         void populate() {
@@ -318,7 +313,14 @@ namespace Worms {
             }
             ssize_t res = read(sock, buff + end, TCP_BUFF_SIZE - end);
             verify(res, "read");
-            end = res;
+            end += res;
+        }
+
+        void print() {
+            printf("Buffer receive iface contains:\n");
+            for (size_t i = beg; i < end; ++i) {
+                putchar_unlocked(buff[i]);
+            }
         }
     };
 }

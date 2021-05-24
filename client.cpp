@@ -4,10 +4,10 @@
 #include <netinet/tcp.h>
 
 #include "defs.h"
-#include "GetAddrInfoRAII.h"
 #include "Epoll.h"
 #include "Buffer.h"
 #include "ClientHeartbeat.h"
+#include "Event.h"
 
 #define QUEUE_LENGTH 5
 #define BUFFER_SIZE 1024
@@ -21,18 +21,20 @@ namespace Worms {
 
         uint64_t const session_id;
         std::string const player_name;
-        struct sockaddr_in6 const server_addr;
         int const server_sock;
-        struct sockaddr_in6 const iface_addr;
         int const iface_sock;
         int const heartbeat_timer;
 
         Epoll epoll;
         UDPSendBuffer server_send_buff;
+        UDPReceiveBuffer server_receive_buff;
         TCPSendBuffer iface_send_buff;
+        TCPReceiveBuffer iface_receive_buff;
         uint8_t turn_direction;
         uint32_t next_expected_event_no;
         bool queued_heartbeat;
+        std::set<std::unique_ptr<Event>, Event::Comparator> future_events;
+        std::vector<std::string> players;
 
 
     public:
@@ -41,14 +43,14 @@ namespace Worms {
             : session_id{static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
                       std::chrono::system_clock::now().time_since_epoch()).count())},
               player_name{std::move(player_name)},
-              server_addr{GetAddrInfoRAII{SOCK_DGRAM, game_server, server_port}.address()},
-              server_sock{socket(PF_INET6, SOCK_DGRAM, IPPROTO_UDP)},
-              iface_addr{GetAddrInfoRAII{SOCK_STREAM, game_iface, iface_port}.address()},
-              iface_sock{socket(PF_INET6, SOCK_STREAM, IPPROTO_TCP)},
-              heartbeat_timer{timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK)},
+              server_sock{getaddrinfo_sock_factory(SOCK_DGRAM, game_server, server_port)},
+              iface_sock{getaddrinfo_sock_factory(SOCK_STREAM, game_iface, iface_port)},
+              heartbeat_timer{timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK)},
               epoll{heartbeat_timer},
-              server_send_buff{UDPEndpoint{server_sock, server_addr, sizeof(server_addr)}},
+              server_send_buff{server_sock},
+              server_receive_buff{server_sock},
               iface_send_buff{iface_sock, INITIAL_IFACE_BUFF_CAP},
+              iface_receive_buff{iface_sock},
               turn_direction{0}, next_expected_event_no{0}, queued_heartbeat{false} {
 
             if (server_sock < 0 || iface_sock < 0)
@@ -60,10 +62,9 @@ namespace Worms {
             verify(setsockopt(iface_sock, IPPROTO_TCP, TCP_NODELAY, &optval, sizeof(optval)),
                    "setsockopt");
 
-            verify(connect(server_sock, (struct sockaddr*)&server_addr, sizeof(server_addr)),
-                    "connecting to server");
-            verify(connect(iface_sock, (struct sockaddr*)&iface_addr, sizeof(iface_addr)),
-                   "connecting to interface");
+            verify(fcntl(server_sock, F_SETFL, O_NONBLOCK), "fcntl");
+            verify(fcntl(iface_sock, F_SETFL, O_NONBLOCK), "fcntl");
+
 
             epoll.add_fd(server_sock);
             epoll.add_fd(iface_sock);
@@ -81,8 +82,13 @@ namespace Worms {
                 fputs("Error closing timer fd", stderr);
         }
 
+    private:
         void handle_iface_msg() {
-
+            assert(!iface_receive_buff.has_data());
+            iface_receive_buff.populate();
+            while (iface_receive_buff.has_data()) {
+                turn_direction = iface_receive_buff.fetch_next();
+            }
         }
 
         void send_heartbeat() {
@@ -90,7 +96,7 @@ namespace Worms {
             ClientHeartbeat heartbeat{session_id, turn_direction, next_expected_event_no,
                                       player_name};
             heartbeat.pack(server_send_buff);
-            if (server_send_buff.flush() == -1) {
+            if (!server_send_buff.flush()) {
                 queued_heartbeat = true;
                 epoll.watch_fd_for_output(server_sock);
             }
@@ -103,6 +109,49 @@ namespace Worms {
             assert(server_send_buff.flush() == server_send_buff.size());
         }
 
+        void handle_events() {
+            assert(server_receive_buff.exhausted());
+            server_receive_buff.populate();
+
+            uint32_t game_id;
+            server_receive_buff.unpack_field(game_id);
+
+            while (!server_receive_buff.exhausted()) {
+                auto event = unpack_event(server_receive_buff);
+
+                // TODO: NEW_GAME, GAME_OVER
+
+                printf("Received event no %u\n", event->event_no);
+
+                if (event->event_no == next_expected_event_no) {
+                    ++next_expected_event_no;
+                    if (event->event_type == GAME_OVER_NUM) {
+                        next_expected_event_no = 0;
+                    } else {
+                        if (event->event_type == NEW_GAME_NUM)
+                            players = dynamic_cast<Event_NEW_GAME*>(&*event)->event_data.players;
+                        event->stringify(iface_send_buff, players);
+                    }
+                } else if (event->event_no > next_expected_event_no) {
+                    future_events.insert(std::move(event));
+                } // else discard duplicated event
+
+                while (!future_events.empty()) { // fetch previously received events from set
+                    if ((*future_events.begin())->event_no == next_expected_event_no) {
+                        (*future_events.begin())->stringify(iface_send_buff, players);
+                        future_events.erase(future_events.begin());
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            if (!iface_send_buff.flush()) {
+                epoll.watch_fd_for_output(iface_sock);
+            }
+        }
+
+    public:
         [[noreturn]] void play() {
             {
                 struct timespec spec{.tv_sec = 0, .tv_nsec = COMMUNICATION_INTERVAL};
@@ -113,6 +162,10 @@ namespace Worms {
             for (;;) {
                 event = epoll.wait();
                 if (event.data.fd == heartbeat_timer) {
+                    uint64_t expirations;
+//                    verify(read(heartbeat_timer, &expirations, sizeof(expirations)),
+//                           "read timerfd");
+                    read(heartbeat_timer, &expirations, sizeof(expirations));
                     send_heartbeat();
                 } else if (event.events & EPOLLOUT) {
                     if (event.data.fd == server_sock) { // drain server queue
@@ -125,6 +178,7 @@ namespace Worms {
                 } else {
                     if (event.data.fd == server_sock) {
                         // receive events from server
+                        handle_events();
                     } else {
                         // receive pressed/released from interface
                         handle_iface_msg();
@@ -181,17 +235,19 @@ int main(int argc, char *argv[]) {
 
 //            printf("flags=%d; tfnd=%d; optind=%d\n", flags, tfnd, optind);
 
-            if (optind >= argc) {
-                fprintf(stderr, "Expected argument after options\n");
-                exit(EXIT_FAILURE);
-            }
+//            if (optind >= argc) {
+//                fprintf(stderr, "Expected argument after options\n");
+//                exit(EXIT_FAILURE);
+//            }
 
-            printf("name argument = %s\n", argv[optind]);
+//            printf("name argument = %s\n", argv[optind]);
         }
     }
 
     Worms::Client client{std::move(player_name), game_server, server_port,
                   game_iface, iface_port};
+
+    client.play();
 
     return 0;
 }

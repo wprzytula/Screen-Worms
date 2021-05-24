@@ -4,7 +4,7 @@
 #include "defs.h"
 #include "Buffer.h"
 #include "Pixel.h"
-#include "PlayerID.h"
+#include "ClientData.h"
 
 namespace Worms {
     struct angle_t {
@@ -13,7 +13,7 @@ namespace Worms {
 
         angle_t(uint16_t angle) : angle{static_cast<uint16_t>(angle % MAX_ANGLE)} {}
 
-        angle_t &operator+=(uint16_t operand) {
+        angle_t& operator+=(uint16_t operand) {
             angle = (angle + operand) % 360u;
             return *this;
         }
@@ -28,7 +28,8 @@ namespace Worms {
         double x;
         double y;
     public:
-        Position(double x, double y) : x{x}, y{y} {}
+        Position(uint32_t x, uint32_t y)
+        : x{static_cast<double>(x)}, y{static_cast<double>(y)} {}
 
         void move_with_angle(angle_t angle) {
             x += std::cos(angle.value());
@@ -42,38 +43,13 @@ namespace Worms {
 
     class Board {
     private:
-        class Field {
-        private:
-            bool is_eaten;
-            std::optional<PlayerID> worm_here;
-        public:
-            explicit Field() : is_eaten(false) {}
-
-            [[nodiscard]] bool will_collide(PlayerID const playerId) const {
-                return is_eaten &&
-                       (!worm_here.has_value() || worm_here.value() != playerId);
-            }
-
-            void put_player(PlayerID const playerId) {
-                assert(!is_eaten || (worm_here.has_value() && worm_here.value() == playerId));
-                worm_here.emplace(playerId);
-                is_eaten = true;
-            }
-
-            void remove_player(PlayerID const playerId) {
-                assert(worm_here.has_value() && worm_here.value() == playerId);
-                worm_here.reset();
-            }
-        };
-
-        using board_t = std::vector<std::vector<Field>>;
-        board_t fields;
+        std::vector<std::vector<bool>> eaten;
         GameConstants const &constants;
 
     public:
         explicit Board(GameConstants const &constants) : constants(constants) {
-            fields.resize(constants.width);
-            for (auto &vec: fields) {
+            eaten.resize(constants.width);
+            for (auto &vec: eaten) {
                 vec.resize(constants.height);
             }
         }
@@ -82,30 +58,15 @@ namespace Worms {
             return position.on_board(constants.width, constants.height);
         }
 
-        [[nodiscard]] bool will_collide(PlayerID const playerId, Pixel const position) const {
+        [[nodiscard]] bool is_eaten(Pixel const position) const {
             assert(contains(position));
-            return fields[position.x][position.y].will_collide(playerId);
+            return eaten[position.x][position.y];
         }
 
-    private:
-        void put_player(PlayerID const playerId, Pixel const position) {
+        void eat(Pixel const position) {
             assert(contains(position));
-            fields[position.x][position.y].put_player(playerId);
-        }
-
-        void remove_player(PlayerID const playerId, Pixel const position) {
-            assert(contains(position));
-            fields[position.x][position.y].remove_player(playerId);
-        }
-
-    public:
-        void init_player(PlayerID const playerId, Pixel const position) {
-            put_player(playerId, position);
-        }
-
-        void move_player(PlayerID const playerId, Pixel const from, Pixel const to) {
-            put_player(playerId, to);
-            remove_player(playerId, from);
+            assert(!eaten[position.x][position.y]);
+            eaten[position.x][position.y] = true;
         }
     };
 }
