@@ -1,6 +1,8 @@
 #ifndef ROBAKI_GAME_H
 #define ROBAKI_GAME_H
 
+#include <algorithm>
+
 #include "defs.h"
 #include "Player.h"
 #include "ClientData.h"
@@ -19,12 +21,12 @@ namespace Worms {
         size_t next_disseminated_event_no = 0;
         std::vector<std::shared_ptr<Player>> players;
         size_t alive_players_num;
-        std::set<std::weak_ptr<Player>, Player::PtrComparator> observers;
+        std::vector<std::weak_ptr<Player>> observers;
         bool _finished = false;
     public:
         Game(GameConstants const& constants, RandomGenerator& rand,
-             std::set<std::shared_ptr<Player>, Player::PtrComparator> const& ready_players,
-             std::set<std::weak_ptr<Player>, Player::PtrComparator> observers)
+             std::set<std::shared_ptr<Player>, Player::Comparator> const& ready_players,
+             std::vector<std::weak_ptr<Player>> observers)
                 : constants{constants}, board{constants}, game_id{rand()},
                   alive_players_num{ready_players.size()}, observers{std::move(observers)} {
             for (auto& player: ready_players) {
@@ -72,7 +74,7 @@ namespace Worms {
         }
 
         void add_observer(std::weak_ptr<Player> const& observer) {
-            observers.insert(observer);
+            observers.push_back(observer);
         }
 
         void play_round() {
@@ -99,6 +101,7 @@ namespace Worms {
                     if (alive_players_num == 0) {
                         generate_event(GAME_OVER_NUM, std::make_unique<Data_GAME_OVER>());
                         _finished = true;
+                        break;
                     }
                 } else {
                     board.eat(after);
@@ -169,14 +172,11 @@ namespace Worms {
             std::vector<decltype(observers.begin())> disconnected_observers;
             for (auto it = observers.begin(); it != observers.end(); ++it) {
                 if (it->expired()) {
-                    disconnected_observers.push_back(it);
+                    it = observers.erase(it);
                 } else {
                     enqueue_event_package(queue, next_disseminated_event_no,
                                           UDPEndpoint{sock, it->lock()->client()->address});
                 }
-            }
-            for (auto it: disconnected_observers) {
-                observers.erase(it);
             }
         }
     };

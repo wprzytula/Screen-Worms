@@ -1,6 +1,7 @@
 #ifndef ROBAKI_BUFFER_H
 #define ROBAKI_BUFFER_H
 
+#include <arpa/inet.h>
 #include "defs.h"
 
 namespace Worms {
@@ -11,15 +12,21 @@ namespace Worms {
     private:
         int const sock;
         sockaddr_in6 _address{};
-        socklen_t addr_len{};
+        socklen_t addr_len{sizeof(sockaddr_in6)};
     public:
         UDPEndpoint(int const sock, sockaddr_in6 const &addr)
                 : sock{sock}, _address{addr}, addr_len{sizeof(sockaddr_in6)} {}
 
         UDPEndpoint(int const sock, void *buff, size_t& size) : sock{sock} {
-            ssize_t res = recvfrom(sock, buff, MAX_DATA_SIZE, 0, reinterpret_cast<sockaddr*>(&_address),
-                            &addr_len);
+            ssize_t res = recvfrom(sock, buff, MAX_DATA_SIZE, 0,
+                                   reinterpret_cast<sockaddr*>(&_address), &addr_len);
             verify(res, "recvfrom");
+//            printf("res = %ld\n", res);
+//            puts("NEW ADDRESS:\t");
+//            for (uint i = 0; i < sizeof(sockaddr_in6); ++i) {
+//                printf("%d ", reinterpret_cast<char*>(&_address)[i]);
+//            }
+//            puts("");
             size = res;
         }
 
@@ -28,7 +35,6 @@ namespace Worms {
         }
 
         ssize_t sendthere(void const *buff, size_t len) const {
-            fprintf(stderr, "Sending to port %d\n", be16toh(_address.sin6_port));
             return sendto(sock, buff, len, 0, reinterpret_cast<sockaddr const *>(&_address),
                           sizeof(_address));
         }
@@ -77,6 +83,7 @@ namespace Worms {
                 return false;
             } else {
                 assert(_size == res);
+                _size = 0;
                 return true;
             }
         }

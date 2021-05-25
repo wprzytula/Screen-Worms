@@ -10,34 +10,34 @@ namespace Worms {
         struct Comparator {
             using is_transparent = void;
 
+            bool operator()(sockaddr_in6 const& addr1, sockaddr_in6 const& addr2) const {
+                return memcmp(&addr1, &addr2, sizeof(sockaddr_in6)) < 0;
+            }
+
             bool operator()(ClientData const &c1, ClientData const &c2) const {
-                return memcmp(&c1.address, &c2.address, sizeof(c1.address)) < 0;
+                return operator()(c1.address, c2.address);
             }
 
             bool operator()(sockaddr_in6 const &addr, ClientData const& c) const {
-                return memcmp(&addr, &c.address, sizeof(c.address)) < 0;
+                return operator()(addr, c.address);
             }
 
             bool operator()(ClientData const& c, sockaddr_in6 const &addr) const {
-                return memcmp(&addr, &c.address, sizeof(c.address)) < 0;
+                return operator()(c.address, addr);
             }
-        };
-        struct PtrComparator {
-            using is_transparent = void;
 
             bool operator()(std::shared_ptr<ClientData> const &c1, std::shared_ptr<ClientData> const &c2) const {
-                return memcmp(&c1->address, &c2->address, sizeof(c1->address)) < 0;
+                return operator()(*c1, *c2);
             }
 
             bool operator()(sockaddr_in6 const &addr, std::shared_ptr<ClientData> const& c) const {
-                return memcmp(&addr, &c->address, sizeof(c->address)) < 0;
+                return operator()(addr, c->address);
             }
 
             bool operator()(std::shared_ptr<ClientData> const& c, sockaddr_in6 const &addr) const {
-                return memcmp(&c->address, &addr, sizeof(c->address)) < 0;
+                return operator()(c->address, addr);
             }
         };
-
 
         sockaddr_in6 const address;
         uint64_t const session_id;
@@ -52,14 +52,6 @@ namespace Worms {
         void heart_has_beaten(uint64_t round_no) {
             last_heartbeat_round_no = round_no;
         }
-        /*bool operator==(ClientData const &p2) const {
-            Comparator cmp;
-            return !cmp(*this, p2) && !cmp(p2, *this);
-        }
-
-        bool operator!=(ClientData const &p2) const {
-            return !(*this == p2);
-        }*/
     };
 }
 

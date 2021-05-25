@@ -1,6 +1,8 @@
 #ifndef ROBAKI_PLAYER_H
 #define ROBAKI_PLAYER_H
 
+#include <utility>
+
 #include "defs.h"
 #include "ClientData.h"
 #include "Board.h"
@@ -11,36 +13,24 @@ namespace Worms {
         struct Comparator {
             using is_transparent = void;
 
-            bool operator()(Player const& p1, Player const& p2) const {
+            bool operator()(Player const &p1, Player const &p2) const {
                 return ClientData::Comparator()(*p1._client, *p2._client);
             }
-        };
-        struct PtrComparator {
-            using is_transparent = void;
 
             bool operator()(std::shared_ptr<Player> const &p1, std::shared_ptr<Player> const &p2) const {
-                return ClientData::Comparator()(*p1->_client, *p2->_client);
+                return operator()(*p1, *p2);
             }
             bool operator()(Player const &p1, std::shared_ptr<Player> const &p2) const {
-                return ClientData::Comparator()(*p1._client, *p2->_client);
+                return operator()(p1, *p2);
             }
             bool operator()(std::shared_ptr<Player> const &p1, Player const &p2) const {
-                return ClientData::Comparator()(*p1->_client, *p2._client);
+                return operator()(*p1, p2);
             }
-            bool operator()(std::weak_ptr<Player> const &p1, std::weak_ptr<Player> const &p2) const {
-                return this->operator()(p1.lock(), p2.lock());
-            }
-//            bool operator()(Player const &p1, std::shared_ptr<Player> const &p2) const {
-//                return ClientData::Comparator()(*p1._client, *p2->_client);
-//            }
-//            bool operator()(std::shared_ptr<Player> const &p1, Player const &p2) const {
-//                return ClientData::Comparator()(*p1->_client, *p2._client);
-//            }
         };
     private:
         std::shared_ptr<ClientData> _client;
     public:
-        std::string const& player_name;
+        std::string const player_name;
     private:
         bool mutable ready = false;
         bool connected = false;
@@ -50,8 +40,8 @@ namespace Worms {
         std::optional<Position> position;
         angle_t angle = 0;
 
-        Player(std::string const& player_name, uint8_t turn_direction)
-                : player_name{player_name}, turn_direction{turn_direction} {}
+        Player(std::string player_name, uint8_t turn_direction)
+                : player_name{std::move(player_name)}, turn_direction{turn_direction} {}
 
         void attach_to_client(std::shared_ptr<ClientData> client) {
             connected = true;

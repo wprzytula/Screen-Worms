@@ -1,6 +1,8 @@
 #ifndef ROBAKI_BOARD_H
 #define ROBAKI_BOARD_H
 
+#include "ctgmath"
+
 #include "defs.h"
 #include "Buffer.h"
 #include "Pixel.h"
