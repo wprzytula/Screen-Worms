@@ -8,11 +8,9 @@
 #include <algorithm>
 
 #include "err.h"
-#include "Event.h"
 #include "Buffer.h"
 #include "RandomGenerator.h"
 #include "GameConstants.h"
-#include "Board.h"
 #include "Epoll.h"
 #include "ClientHeartbeat.h"
 #include "Player.h"
@@ -37,8 +35,8 @@ namespace Worms {
         UDPReceiveBuffer receive_buff{sock};
 
         std::set<std::shared_ptr<ClientData>, ClientData::PtrComparator> connected_clients;
-        std::set<std::shared_ptr<Player>/*, Player::PtrComparator*/> connected_players;
-        std::set<std::shared_ptr<Player>/*, Player::PtrComparator*/> connected_unnames;
+        std::set<std::shared_ptr<Player>, Player::PtrComparator> connected_players;
+        std::set<std::shared_ptr<Player>, Player::PtrComparator> connected_unnames;
         std::set<std::string> player_names;
 
     public:
@@ -73,7 +71,7 @@ namespace Worms {
         }
     private:
         void disconnect_idles() {
-            std::vector<typeof(connected_clients.begin())> to_disconnect;
+            std::vector<decltype(connected_clients.begin())> to_disconnect;
             for (auto it = connected_clients.begin(); it != connected_clients.end(); ++it) {
                 if ((round_no - (*it)->last_heartbeat_round_no) * round_duration_ns
                     >= DISCONNECT_THRESHOLD) {
@@ -81,8 +79,7 @@ namespace Worms {
                 }
             }
             for (auto it : to_disconnect) {
-                (*it)->player.disconnect();
-                connected_clients.erase(it);
+                disconnect_client(it);
             }
         }
 
@@ -103,9 +100,8 @@ namespace Worms {
                             break;
                         }
                     }
-                    if (all_ready) {
+                    if (all_ready)
                         start_game();
-                    }
                 }
             }
 
@@ -114,7 +110,7 @@ namespace Worms {
         }
 
         void start_game() {
-            std::set<std::weak_ptr<Player>> observers;
+            std::set<std::weak_ptr<Player>, Player::PtrComparator> observers;
             for (auto& observer: connected_unnames) {
                 observers.insert(std::weak_ptr<Player>{observer});
             }
@@ -140,16 +136,20 @@ namespace Worms {
                 if (player_names.find(heartbeat.player_name) == player_names.end()) {
                     connect_client(sender, std::move(heartbeat));
                 } // else ignore and discard heartbeat
-            } else {
+            } else { // client with the same address had been connected
                 auto &client = *client_ptr;
                 if (client->session_id == heartbeat.session_id) {
                     client->heart_has_beaten(round_no);
                     client->player.turn_direction = heartbeat.turn_direction;
                     if (heartbeat.turn_direction == LEFT || heartbeat.turn_direction == RIGHT)
                         client->player.got_ready();
+
+                    if (current_game.has_value()) {
+                        current_game->respond_with_events(send_queue, sock, sender,
+                                                          heartbeat.next_expected_event_no);
+                    }
                 } else if (client->session_id > heartbeat.session_id) {
-                    client->player.disconnect();
-                    connected_clients.erase(client_ptr);
+                    disconnect_client(client_ptr);
                     connect_client(sender, std::move(heartbeat));
                 }
             }
@@ -174,18 +174,17 @@ namespace Worms {
             }
         }
 
-        void disconnect_client(typeof(connected_clients.begin()) client_ptr) {
+        void disconnect_client(decltype(connected_clients.begin()) client_ptr) {
             auto& client = *client_ptr;
 
             client->player.disconnect();
             if (client->player.is_observer()) {
-                connected_unnames.erase(client->player);
+                connected_unnames.erase(connected_unnames.find(client->player));
             } else {
                 player_names.erase(client->player.player_name);
-                connected_players.erase()
+                connected_players.erase(connected_players.find(client->player));
             }
-
-
+            connected_clients.erase(client_ptr);
         }
 
     public:

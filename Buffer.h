@@ -67,7 +67,7 @@ namespace Worms {
         bool flush() {
             ssize_t res;
             if (receiver.has_value())
-                receiver->sendthere(buff, _size);
+                res = receiver->sendthere(buff, _size);
             else
                 res = send(*receiver_sock, buff, _size, 0);
 //            fprintf(stderr, "Sent %ld bytes\n", res);

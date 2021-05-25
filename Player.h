@@ -3,6 +3,7 @@
 
 #include "defs.h"
 #include "ClientData.h"
+#include "Board.h"
 
 namespace Worms {
     class Player {
@@ -10,7 +11,7 @@ namespace Worms {
         struct Comparator {
             using is_transparent = void;
 
-            bool operator()(std::shared_ptr<Player> p1, Player const &p2) const {
+            bool operator()(Player const& p1, Player const& p2) const {
                 return ClientData::Comparator()(*p1._client, *p2._client);
             }
         };
@@ -20,6 +21,21 @@ namespace Worms {
             bool operator()(std::shared_ptr<Player> const &p1, std::shared_ptr<Player> const &p2) const {
                 return ClientData::Comparator()(*p1->_client, *p2->_client);
             }
+            bool operator()(Player const &p1, std::shared_ptr<Player> const &p2) const {
+                return ClientData::Comparator()(*p1._client, *p2->_client);
+            }
+            bool operator()(std::shared_ptr<Player> const &p1, Player const &p2) const {
+                return ClientData::Comparator()(*p1->_client, *p2._client);
+            }
+            bool operator()(std::weak_ptr<Player> const &p1, std::weak_ptr<Player> const &p2) const {
+                return this->operator()(p1.lock(), p2.lock());
+            }
+//            bool operator()(Player const &p1, std::shared_ptr<Player> const &p2) const {
+//                return ClientData::Comparator()(*p1._client, *p2->_client);
+//            }
+//            bool operator()(std::shared_ptr<Player> const &p1, Player const &p2) const {
+//                return ClientData::Comparator()(*p1->_client, *p2._client);
+//            }
         };
     private:
         std::shared_ptr<ClientData> _client;
