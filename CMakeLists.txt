@@ -11,7 +11,7 @@ add_library(err err.cpp err.h)
 
 add_executable(screen-worms-client client.cpp gai_sock_factory.cpp Event.h Buffer.h Crc32Computer.h ClientHeartbeat.h Pixel.h defs.h Epoll.h)
 target_link_libraries(screen-worms-client err)
-add_executable(screen-worms-server server.cpp Event.h Buffer.h RandomGenerator.h Board.h GameConstants.h Crc32Computer.h ClientHeartbeat.h Pixel.h ClientData.h defs.h Epoll.h Player.h)
+add_executable(screen-worms-server server.cpp Event.h Buffer.h RandomGenerator.h Board.h GameConstants.h Crc32Computer.h ClientHeartbeat.h Pixel.h ClientData.h defs.h Epoll.h Player.h Game.h)
 target_link_libraries(screen-worms-server err)
 
 find_package(PkgConfig REQUIRED)

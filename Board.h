@@ -18,6 +18,11 @@ namespace Worms {
             return *this;
         }
 
+        angle_t& operator-=(uint16_t operand) {
+            angle = (angle - operand) % 360u;
+            return *this;
+        }
+
         [[nodiscard]] uint16_t value() const {
             return angle;
         }

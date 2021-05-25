@@ -16,94 +16,19 @@
 #include "Epoll.h"
 #include "ClientHeartbeat.h"
 #include "Player.h"
+#include "Game.h"
 
 namespace Worms {
-    class Game {
-    private:
-        GameConstants constants;
-        Board board;
-        RandomGenerator& rand;
-        uint32_t const game_id;
-        std::vector<std::unique_ptr<Event const>> events;
-        std::vector<std::shared_ptr<Player>> players;
-        std::set<std::shared_ptr<ClientData>> observers;
-    public:
-        Game(GameConstants constants, RandomGenerator& rand, std::set<std::shared_ptr<Player>> const& ready_players,
-             std::set<std::shared_ptr<ClientData>> observers)
-            : constants{constants}, board{constants}, rand{rand}, game_id{rand()},
-              observers{std::move(observers)} {
-            for (auto& player: ready_players) {
-                players.push_back(player);
-            }
-            std::sort(players.begin(), players.end(),
-                      [](std::shared_ptr<Player> const& p1,
-                         std::shared_ptr<Player> const& p2){
-                return p1->player_name < p2->player_name;
-            });
-
-            {   // generate NEW_GAME
-                std::vector<std::string> player_names;
-                player_names.resize(players.size());
-                for (size_t i = 0; i < players.size(); ++i) {
-                    player_names[i] = players[i]->player_name;
-                }
-                generate_event(NEW_GAME_NUM, std::make_unique<Data_NEW_GAME>(
-                        constants.width, constants.height, std::move(player_names)));
-            }
-            for (size_t i = 0; i < players.size(); ++i) {
-                auto& player = players[i];
-                player->position.emplace(rand() % constants.width + 0.5,
-                                         rand() % constants.height + 0.5);
-                player->angle = rand() % 360;
-                auto player_pixel = player->position->as_pixel();
-                if (board.is_eaten(player_pixel)) {
-                    generate_event(PLAYER_ELIMINATED_NUM,
-                                   std::make_unique<Data_PLAYER_ELIMINATED>(i));
-                } else {
-                    board.eat(player_pixel);
-                    generate_event(PIXEL_NUM,std::make_unique<Data_PIXEL>(
-                            i, player_pixel.x, player_pixel.y));
-                }
-            }
-        }
-
-        void generate_event(uint8_t event_type, std::unique_ptr<EventDataIface> data) {
-            uint32_t event_no = events.size();
-            std::unique_ptr<Event> event;
-
-            switch (event_type) {
-                case NEW_GAME_NUM: {
-                    event = std::make_unique<Event_NEW_GAME>(
-                            event_no, event_type, *(dynamic_cast<Data_NEW_GAME*>(data.get())));
-                    break;
-                }
-                case PIXEL_NUM: {
-                    event = std::make_unique<Event_PIXEL>(
-                            event_no, event_type, *(dynamic_cast<Data_PIXEL*>(data.get())));
-                    break;
-                }
-                case PLAYER_ELIMINATED_NUM:
-                    event = std::make_unique<Event_PLAYER_ELIMINATED>(
-                            event_no, event_type, *(dynamic_cast<Data_PLAYER_ELIMINATED*>(data.get())));
-                    break;
-                case GAME_OVER_NUM:
-                    event = std::make_unique<Event_GAME_OVER>(
-                            event_no, event_type, *(dynamic_cast<Data_GAME_OVER*>(data.get())));
-                    break;
-                default:
-                    assert(false);
-            }
-            events.push_back(std::move(event));
-        }
-    };
-
     class Server {
     private:
+        static constexpr uint64_t const NS_IN_SEC = 1'000'000'000;
+        static constexpr uint64_t const DISCONNECT_THRESHOLD = 2 * NS_IN_SEC;
+
         uint16_t const port;
         int const sock;
         int const round_timer;
         Epoll epoll;
-        uint64_t round_no;
+        uint64_t round_no = 0;
         RandomGenerator rand;
         GameConstants const constants;
         uint64_t const round_duration_ns;
@@ -111,7 +36,8 @@ namespace Worms {
         std::queue<UDPSendBuffer> send_queue;
         UDPReceiveBuffer receive_buff{sock};
 
-        std::set<ClientData, ClientData::Comparator> connected_players;
+        std::set<std::shared_ptr<ClientData>, ClientData::PtrComparator> connected_clients;
+        std::set<std::shared_ptr<Player>, Player::Comparator> connected_players;
         std::set<std::string> player_names;
 
     public:
@@ -120,10 +46,9 @@ namespace Worms {
                   sock{socket(PF_INET6, SOCK_DGRAM, IPPROTO_UDP)},
                   round_timer{timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK)},
                   epoll{round_timer},
-                  round_no{0},
                   rand{RandomGenerator{seed}},
                   constants{constants},
-                  round_duration_ns{1'000'000'000 / constants.round_per_sec}{
+                  round_duration_ns{NS_IN_SEC / constants.round_per_sec}{
             if (sock < 0)
                 syserr(errno, "opening socket");
             if (round_timer < 0)
@@ -148,20 +73,28 @@ namespace Worms {
         }
     private:
         void disconnect_idles() {
-            std::vector<typeof(connected_players.begin())> to_disconnect;
-            for (auto it = connected_players.begin(); it != connected_players.end(); ++it) {
-                if ((round_no - it->last_heartbeat_round_no) * round_duration_ns >= 2'000'000'000) {
+            std::vector<typeof(connected_clients.begin())> to_disconnect;
+            for (auto it = connected_clients.begin(); it != connected_clients.end(); ++it) {
+                if ((round_no - (*it)->last_heartbeat_round_no) * round_duration_ns
+                    >= DISCONNECT_THRESHOLD) {
                     to_disconnect.push_back(it);
                 }
             }
             for (auto it : to_disconnect) {
-//                it->
-                connected_players.erase(it);
+                (*it)->player.lock()->disconnect();
+                connected_clients.erase(it);
             }
         }
 
         void play_round() {
-
+            if (current_game.has_value()) {
+                current_game->play_round();
+                current_game->disseminate_new_events(send_queue, sock);
+            } else {
+                for () {
+                    
+                }
+            }
         }
 
         bool drain_queue() {
@@ -179,14 +112,15 @@ namespace Worms {
             auto sender = receive_buff.populate();
             ClientHeartbeat heartbeat{receive_buff};
 
-            if (connected_players.find(sender) == connected_players.end()) {
+            auto client_ptr = connected_clients.find(sender);
+            if (connected_clients.find(sender) == connected_clients.end()) {
                 if (player_names.find(heartbeat.player_name) == player_names.end()) {
                     connect_client();
                 } else {
                     // discard, ignore, annihilate!
                 }
             } else {
-                auto const& client = connected_players.find(sender);
+                auto& client = *client_ptr;
                 if (client->session_id < heartbeat.session_id) {
                     // discard, ignore, annihilate!
                 } else if (client->session_id > heartbeat.session_id) {
@@ -227,7 +161,7 @@ namespace Worms {
                         epoll.stop_watching_fd_for_output(sock);
                     // else keep us notified about socket possibility to send
                 } else {
-                    // receive heartbeat from client
+                    // receive heartbeat from _client
                     handle_heartbeat();
                 }
             }

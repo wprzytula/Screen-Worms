@@ -1,4 +1,3 @@
-#include <arpa/inet.h>
 #include "defs.h"
 
 namespace Worms {

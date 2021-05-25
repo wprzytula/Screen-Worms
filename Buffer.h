@@ -38,11 +38,15 @@ namespace Worms {
     private:
         char buff[MAX_DATA_SIZE] = {0};
         uint16_t _size;
-        int const receiver_sock;
+        std::optional<int const> const receiver_sock;
+        std::optional<UDPEndpoint> receiver;
 
     public:
-        explicit UDPSendBuffer(int receiver)
-                : _size{0}, receiver_sock{receiver} {}
+        explicit UDPSendBuffer(int receiver_sock)
+                : _size{0}, receiver_sock{receiver_sock} {}
+
+        explicit UDPSendBuffer(UDPEndpoint receiver)
+                : _size{0}, receiver{receiver} {}
 
         ~UDPSendBuffer() {
             assert(_size == 0);
@@ -61,7 +65,11 @@ namespace Worms {
         }
 
         bool flush() {
-            ssize_t res = send(receiver_sock, buff, _size, 0);
+            ssize_t res;
+            if (receiver.has_value())
+                receiver->sendthere(buff, _size);
+            else
+                res = send(*receiver_sock, buff, _size, 0);
 //            fprintf(stderr, "Sent %ld bytes\n", res);
             if (res == -1) {
                 if (!(errno == EAGAIN || errno == EWOULDBLOCK))

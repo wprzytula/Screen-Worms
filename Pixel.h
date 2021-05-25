@@ -13,6 +13,10 @@ namespace Worms {
         }
 
         Pixel(uint32_t const x, uint32_t const y) : x(x), y(y) {}
+
+        bool operator==(Pixel const& p2) const {
+            return x == p2.x && y == p2.y;
+        }
     };
 }
 
