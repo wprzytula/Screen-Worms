@@ -120,7 +120,7 @@ namespace Worms {
 
             len -= sizeof(maxx) + sizeof(maxy);
             try {
-                while (len > 0) {
+                while (len < MAX_DATA_SIZE) {
                     players.push_back(buff.unpack_name());
                     len -= players[players.size() - 1].size() + 1;
                 }

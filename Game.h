@@ -58,7 +58,7 @@ namespace Worms {
                                          rand() % constants.height + 0.5);
                 player->angle = rand() % 360;
                 auto player_pixel = player->position->as_pixel();
-                if (board.is_eaten(player_pixel)) {
+                if (!board.contains(player_pixel) || board.is_eaten(player_pixel)) {
                     generate_event(PLAYER_ELIMINATED_NUM,
                                    std::make_unique<Data_PLAYER_ELIMINATED>(i));
                 } else {
@@ -93,7 +93,7 @@ namespace Worms {
                 Pixel after = player->position->as_pixel();
                 if (before == after) {
                     continue;
-                } else if (board.is_eaten(after)) {
+                } else if (!board.contains(after) || board.is_eaten(after)) {
                     player->lose();
                     --alive_players_num;
                     generate_event(PLAYER_ELIMINATED_NUM, std::make_unique<Data_PLAYER_ELIMINATED>(
@@ -146,11 +146,13 @@ namespace Worms {
                 return;
 
             send_queue.emplace(receiver);
+            send_queue.back().pack_field(game_id);
             for (auto it = events.begin() + static_cast<long>(next_event);
                  it != events.end(); ++it) {
                 auto& event = *it;
                 if (send_queue.back().remaining() < event->size()) {
                     send_queue.emplace(receiver); // A new buffer is needed, as the previous one is full.
+                    send_queue.back().pack_field(game_id);
                 }
                 event->pack(send_queue.back());
             }
@@ -172,11 +174,14 @@ namespace Worms {
             std::vector<decltype(observers.begin())> disconnected_observers;
             for (auto it = observers.begin(); it != observers.end(); ++it) {
                 if (it->expired()) {
-                    it = observers.erase(it);
+                    disconnected_observers.push_back(it);
                 } else {
                     enqueue_event_package(queue, next_disseminated_event_no,
                                           UDPEndpoint{sock, it->lock()->client()->address});
                 }
+            }
+            for (auto& disconnected: disconnected_observers) {
+                observers.erase(disconnected);
             }
         }
     };

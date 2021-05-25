@@ -140,15 +140,15 @@ namespace Worms {
 
             auto client_ptr = connected_clients.find(sender);
             if (connected_clients.find(sender) == connected_clients.end()) {
-                cout << "Address not found so far.\n";
+//                cout << "Address not found so far.\n";
                 if (player_names.find(heartbeat.player_name) == player_names.end()) {
                     connect_client(sender, std::move(heartbeat));
                 } // else ignore and discard heartbeat
                 else {
-                    cout << "Name already taken.\n";
+//                    cout << "Name already taken.\n";
                 }
             } else { // client with the same address had been connected
-                cout << "Address already taken\n";
+//                cout << "Address already taken\n";
                 auto &client = *client_ptr;
                 if (client->session_id == heartbeat.session_id) {
                     client->heart_has_beaten(round_no);

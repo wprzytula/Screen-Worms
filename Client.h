@@ -14,7 +14,7 @@ namespace Worms {
 
     class Client {
     private:
-        static constexpr long const COMMUNICATION_INTERVAL = 30'000'000;
+        static constexpr long const COMMUNICATION_INTERVAL = 30'000'000 /*999'999'999*/;
         static constexpr long const INITIAL_IFACE_BUFF_CAP = 256;
 
         uint64_t const session_id;
@@ -119,7 +119,7 @@ namespace Worms {
 
                 // TODO: NEW_GAME, GAME_OVER
 
-                printf("Received event no %u\n", event->event_no);
+//                printf("Received event no %u\n", event->event_no);
 
                 if (event->event_no == next_expected_event_no) {
                     ++next_expected_event_no;
