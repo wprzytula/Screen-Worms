@@ -24,7 +24,6 @@ namespace Worms {
         static constexpr uint64_t const NS_IN_SEC = 1'000'000'000;
         static constexpr uint64_t const DISCONNECT_THRESHOLD = 2 * NS_IN_SEC;
 
-        uint16_t const port;
         int const sock;
         int const round_timer;
         Epoll epoll;
@@ -33,17 +32,18 @@ namespace Worms {
         GameConstants const constants;
         uint64_t const round_duration_ns;
         std::optional<Game> current_game;
+        std::optional<Game> previous_game;
         std::queue<UDPSendBuffer> send_queue;
         UDPReceiveBuffer receive_buff{sock};
 
         std::set<std::shared_ptr<ClientData>, ClientData::PtrComparator> connected_clients;
-        std::set<std::shared_ptr<Player>, Player::Comparator> connected_players;
+        std::set<std::shared_ptr<Player>/*, Player::PtrComparator*/> connected_players;
+        std::set<std::shared_ptr<Player>/*, Player::PtrComparator*/> connected_unnames;
         std::set<std::string> player_names;
 
     public:
         explicit Server(uint16_t const port, uint32_t const seed, GameConstants constants)
-                : port{port},
-                  sock{socket(PF_INET6, SOCK_DGRAM, IPPROTO_UDP)},
+                : sock{socket(PF_INET6, SOCK_DGRAM, IPPROTO_UDP)},
                   round_timer{timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK)},
                   epoll{round_timer},
                   rand{RandomGenerator{seed}},
@@ -81,24 +81,47 @@ namespace Worms {
                 }
             }
             for (auto it : to_disconnect) {
-                (*it)->player.lock()->disconnect();
+                (*it)->player.disconnect();
                 connected_clients.erase(it);
             }
         }
 
-        void play_round() {
+        void round_routine() {
             if (current_game.has_value()) {
                 current_game->play_round();
                 current_game->disseminate_new_events(send_queue, sock);
-            } else {
-                for () {
-                    
+                if (current_game->finished()) {
+                    previous_game.emplace(std::move(current_game.value()));
+                    current_game.reset();
+                }
+            } else { // Check if a game can be started.
+                if (connected_players.size() >= 2) {
+                    bool all_ready = true;
+                    for (auto& player: connected_players) {
+                        if (!player->is_ready()) {
+                            all_ready = false;
+                            break;
+                        }
+                    }
+                    if (all_ready) {
+                        start_game();
+                    }
                 }
             }
+
+            if (!drain_queue())
+                epoll.watch_fd_for_output(sock);
+        }
+
+        void start_game() {
+            std::set<std::weak_ptr<Player>> observers;
+            for (auto& observer: connected_unnames) {
+                observers.insert(std::weak_ptr<Player>{observer});
+            }
+            current_game.emplace(constants, rand, connected_players, std::move(observers));
         }
 
         bool drain_queue() {
-            assert(!send_queue.empty());
             while (!send_queue.empty()) {
                 if (send_queue.front().flush())
                     send_queue.pop();
@@ -115,25 +138,53 @@ namespace Worms {
             auto client_ptr = connected_clients.find(sender);
             if (connected_clients.find(sender) == connected_clients.end()) {
                 if (player_names.find(heartbeat.player_name) == player_names.end()) {
-                    connect_client();
-                } else {
-                    // discard, ignore, annihilate!
-                }
+                    connect_client(sender, std::move(heartbeat));
+                } // else ignore and discard heartbeat
             } else {
-                auto& client = *client_ptr;
-                if (client->session_id < heartbeat.session_id) {
-                    // discard, ignore, annihilate!
+                auto &client = *client_ptr;
+                if (client->session_id == heartbeat.session_id) {
+                    client->heart_has_beaten(round_no);
+                    client->player.turn_direction = heartbeat.turn_direction;
+                    if (heartbeat.turn_direction == LEFT || heartbeat.turn_direction == RIGHT)
+                        client->player.got_ready();
                 } else if (client->session_id > heartbeat.session_id) {
-
-                } else {
-                    client->last_heartbeat_round_no = round_no;
-
+                    client->player.disconnect();
+                    connected_clients.erase(client_ptr);
+                    connect_client(sender, std::move(heartbeat));
                 }
             }
-
         }
 
-        void connect_client() {
+        void connect_client(sockaddr_in6 const& addr, ClientHeartbeat heartbeat) {
+            auto player = std::make_shared<Player>(std::move(heartbeat.player_name),
+                                                   heartbeat.turn_direction);
+            if (player->is_observer()) {
+                connected_unnames.insert(player);
+            }
+            else {
+                connected_players.insert(player);
+                player_names.insert(player->player_name);
+            }
+
+            connected_clients.emplace(std::make_shared<ClientData>(
+                    addr, heartbeat.session_id, round_no, *player));
+
+            if (current_game.has_value()) {
+                current_game->add_observer(player);
+            }
+        }
+
+        void disconnect_client(typeof(connected_clients.begin()) client_ptr) {
+            auto& client = *client_ptr;
+
+            client->player.disconnect();
+            if (client->player.is_observer()) {
+                connected_unnames.erase(client->player);
+            } else {
+                player_names.erase(client->player.player_name);
+                connected_players.erase()
+            }
+
 
         }
 
@@ -153,7 +204,7 @@ namespace Worms {
                     verify(read(round_timer, &expirations, sizeof(expirations)),
                            "read timerfd");
                     for (size_t i = 0; i < expirations; ++i) {
-                        play_round();
+                        round_routine();
                     }
                 } else if (event.events & EPOLLOUT) {
                     // drain server queue

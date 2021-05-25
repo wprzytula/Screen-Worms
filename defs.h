@@ -21,6 +21,10 @@
 #include "err.h"
 
 namespace Worms {
+    constexpr uint8_t const STRAIGHT = 0;
+    constexpr uint8_t const RIGHT = 1;
+    constexpr uint8_t const LEFT = 2;
+
     int gai_sock_factory(int sock_type, char const *name, uint16_t port);
 
     template<typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>

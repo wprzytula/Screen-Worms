@@ -10,7 +10,7 @@ namespace Worms {
         struct Comparator {
             using is_transparent = void;
 
-            bool operator()(Player const &p1, Player const &p2) const {
+            bool operator()(std::shared_ptr<Player> p1, Player const &p2) const {
                 return ClientData::Comparator()(*p1._client, *p2._client);
             }
         };
@@ -25,20 +25,50 @@ namespace Worms {
         std::shared_ptr<ClientData> _client;
     public:
         std::string const& player_name;
-        bool mutable ready = false;
     private:
-        bool connected = true;
+        bool mutable ready = false;
+        bool connected = false;
+        bool alive = true;
     public:
         uint8_t mutable turn_direction;
         std::optional<Position> position;
         angle_t angle = 0;
 
-        Player(std::shared_ptr<ClientData> client, std::string const& player_name,
-               uint8_t turn_direction)
-                : _client{std::move(client)}, player_name{player_name}, turn_direction{turn_direction} {}
+        Player(std::string const& player_name, uint8_t turn_direction)
+                : player_name{player_name}, turn_direction{turn_direction} {}
+
+        void attach_to_client(std::shared_ptr<ClientData> client) {
+            connected = true;
+            _client = std::move(client);
+        }
+
+        bool is_observer() const {
+            return player_name.empty();
+        }
 
         bool is_connected() const {
             return connected;
+        }
+
+        bool is_ready() const {
+            return connected;
+        }
+
+        bool is_alive() const {
+            return alive;
+        }
+
+        void got_ready() {
+            ready = true;
+        }
+
+        void new_game() {
+            ready = false;
+            alive = true;
+        }
+
+        void lose() {
+            alive = false;
         }
 
         void disconnect() {

@@ -254,6 +254,8 @@ namespace Worms {
     /* GAME_OVER */
     constexpr uint8_t const GAME_OVER_NUM = 3;
     struct Data_GAME_OVER : public EventDataIface {
+        Data_GAME_OVER() = default;
+
         Data_GAME_OVER(UDPReceiveBuffer&, uint32_t) {}
 
         [[nodiscard]] size_t size() const override {

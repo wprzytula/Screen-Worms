@@ -12,29 +12,35 @@
 namespace Worms {
     class Game {
     private:
-        GameConstants constants;
+        GameConstants const& constants;
         Board board;
         RandomGenerator& rand;
         uint32_t const game_id;
         std::vector<std::unique_ptr<Event const>> events;
         size_t next_disseminated_event_no = 0;
         std::vector<std::shared_ptr<Player>> players;
-        std::set<std::shared_ptr<ClientData>> observers;
+        size_t alive_players_num;
+        std::set<std::weak_ptr<Player>> observers;
+        bool _finished = false;
     public:
-        Game(GameConstants constants, RandomGenerator& rand, std::set<std::shared_ptr<Player>> const& ready_players,
-             std::set<std::shared_ptr<ClientData>> observers)
+        Game(GameConstants const& constants, RandomGenerator& rand,
+             std::set<std::shared_ptr<Player>> const& ready_players,
+             std::set<std::weak_ptr<Player>> observers)
                 : constants{constants}, board{constants}, rand{rand}, game_id{rand()},
-                  observers{std::move(observers)} {
+                  alive_players_num{ready_players.size()}, observers{std::move(observers)} {
             for (auto& player: ready_players) {
+                player->new_game();
                 players.push_back(player);
             }
+
+            // Sort players alphabetically.
             std::sort(players.begin(), players.end(),
                       [](std::shared_ptr<Player> const& p1,
                          std::shared_ptr<Player> const& p2){
                           return p1->player_name < p2->player_name;
                       });
 
-            {   // generate NEW_GAME
+            {   // Generate NEW_GAME.
                 std::vector<std::string> player_names;
                 player_names.resize(players.size());
                 for (size_t i = 0; i < players.size(); ++i) {
@@ -62,9 +68,19 @@ namespace Worms {
             }
         }
 
+        [[nodiscard]] bool finished() const {
+            return _finished;
+        }
+
+        void add_observer(std::weak_ptr<Player> const& observer) {
+            observers.insert(observer);
+        }
+
         void play_round() {
             for (size_t i = 0; i < players.size(); ++i) {
                 auto& player = players[i];
+                if (!player->is_alive())
+                    continue;
 
                 if (player->turn_direction == 1)
                     player->angle += constants.turning_speed;
@@ -77,6 +93,8 @@ namespace Worms {
                 if (before == after) {
                     continue;
                 } else if (board.is_eaten(after)) {
+                    player->lose();
+                    --alive_players_num;
                     generate_event(PLAYER_ELIMINATED_NUM, std::make_unique<Data_PLAYER_ELIMINATED>(
                             Data_PLAYER_ELIMINATED{static_cast<uint8_t>(i)}));
                 } else {
@@ -84,9 +102,14 @@ namespace Worms {
                     generate_event(PIXEL_NUM, std::make_unique<Data_PIXEL>(
                             Data_PIXEL{static_cast<uint8_t>(i), after.x, after.y}));
                 }
+
+                if (alive_players_num == 0) {
+                    generate_event(GAME_OVER_NUM, std::make_unique<Data_GAME_OVER>());
+                    _finished = true;
+                }
             }
         }
-
+    private:
         void generate_event(uint8_t event_type, std::unique_ptr<EventDataIface> data) {
             uint32_t event_no = events.size();
             std::unique_ptr<Event> event;
@@ -116,7 +139,6 @@ namespace Worms {
             events.push_back(std::move(event));
         }
 
-    private:
         void enqueue_event_package(std::queue<UDPSendBuffer>& send_queue,
                                    size_t const next_event, UDPEndpoint receiver) {
             if (next_event >= events.size())
@@ -140,6 +162,18 @@ namespace Worms {
                     enqueue_event_package(queue, next_disseminated_event_no,
                                           UDPEndpoint{sock, player->client()->address});
                 }
+            }
+            std::vector<typeof(observers.begin())> disconnected_observers;
+            for (auto it = observers.begin(); it != observers.end(); ++it) {
+                if (it->expired()) {
+                    disconnected_observers.push_back(it);
+                } else {
+                    enqueue_event_package(queue, next_disseminated_event_no,
+                                          UDPEndpoint{sock, it->lock()->client()->address});
+                }
+            }
+            for (auto it: disconnected_observers) {
+                observers.erase(it);
             }
         }
     };

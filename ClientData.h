@@ -40,10 +40,18 @@ namespace Worms {
 
 
         sockaddr_in6 const address;
-        uint64_t mutable session_id;
+        uint64_t const session_id;
         uint64_t mutable last_heartbeat_round_no;
-        std::weak_ptr<Player> player;
+        Player& player;
 
+        ClientData(sockaddr_in6 const &address, uint64_t const session_id,
+                   uint64_t last_heartbeat_round_no, Player &player)
+                   : address{address}, session_id{session_id},
+                     last_heartbeat_round_no{last_heartbeat_round_no}, player{player} {}
+
+        void heart_has_beaten(uint64_t round_no) {
+            last_heartbeat_round_no = round_no;
+        }
         /*bool operator==(ClientData const &p2) const {
             Comparator cmp;
             return !cmp(*this, p2) && !cmp(p2, *this);
