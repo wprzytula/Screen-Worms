@@ -57,7 +57,7 @@ namespace Worms {
         }
 
         bool is_ready() const {
-            return connected;
+            return ready;
         }
 
         bool is_alive() const {
@@ -65,6 +65,9 @@ namespace Worms {
         }
 
         void got_ready() {
+            if (!ready) {
+                printf("%s got ready!\n", player_name.c_str());
+            }
             ready = true;
         }
 

@@ -25,7 +25,7 @@ namespace Worms {
         uint8_t event_type;
 
         Event(uint32_t len, uint32_t event_no, uint8_t event_type)
-            : len(len), event_no(event_no), event_type(event_type) {}
+            : len{len}, event_no{event_no}, event_type{event_type} {}
 
         virtual ~Event() = default;
 
@@ -40,8 +40,6 @@ namespace Worms {
         virtual ~EventDataIface() = default;
 
         [[nodiscard]] virtual size_t size() const = 0;
-
-        virtual void add_to_crc32(Crc32Computer& crc32_computer) const = 0;
 
         virtual void pack(UDPSendBuffer& buff) const = 0;
 
@@ -61,15 +59,13 @@ namespace Worms {
         EventImpl(uint32_t event_no, uint8_t event_type, EventData data)
             : Event{static_cast<uint32_t>(sizeof(event_no) + sizeof(event_type) + data.size()),
                     event_no, event_type},
-              event_data{std::move(data)}, crc32{compute_crc32()} {}
+              event_data{std::move(data)} {}
 
         // Construction from UDPReceiveBuffer.
         EventImpl(uint32_t len, uint32_t event_no, uint8_t event_type, UDPReceiveBuffer& buff)
             : Event{len, event_no, event_type},
               event_data{buff, len - static_cast<uint32_t>(sizeof(event_no) + sizeof(event_type))} {
                 buff.unpack_field(crc32);
-                if (crc32 != compute_crc32())
-                    throw Crc32Mismatch{};
             }
 
         [[nodiscard]] size_t size() const override {
@@ -77,24 +73,16 @@ namespace Worms {
                     event_data.size() + sizeof(crc32);
         }
 
-        [[nodiscard]] crc32_t compute_crc32() const {
-            Crc32Computer crc32_computer;
-            crc32_computer.add(htobe(len));
-            crc32_computer.add(htobe(event_no));
-            crc32_computer.add(htobe(event_type));
-            event_data.add_to_crc32(crc32_computer);
-            return crc32_computer.value();
-        };
-
         void pack(UDPSendBuffer& buff) const override {
             buff.pack_field(len);
             buff.pack_field(event_no);
             buff.pack_field(event_type);
             event_data.pack(buff);
-            buff.pack_field(crc32);
+            buff.compute_crc(len + sizeof(len));
         }
 
-        void stringify(TCPSendBuffer& buff, std::vector<std::string> const& players) const override {
+        void stringify(TCPSendBuffer& buff,
+                       std::vector<std::string> const& players) const override {
             event_data.pack_name(buff);
             event_data.stringify(buff, players);
             buff.end_message();
@@ -119,13 +107,9 @@ namespace Worms {
             buff.unpack_field(maxy);
 
             len -= sizeof(maxx) + sizeof(maxy);
-            try {
-                while (len > 0 && len < MAX_DATA_SIZE) {
-                    players.push_back(buff.unpack_name());
-                    len -= players[players.size() - 1].size() + 1;
-                }
-            } catch (/*UnendedName*/std::bad_alloc const&) {
-                // TODO
+            while (len > 0 && len < MAX_DATA_SIZE) {
+                players.push_back(buff.unpack_name());
+                len -= players[players.size() - 1].size() + 1;
             }
         }
 
@@ -133,17 +117,8 @@ namespace Worms {
             return sizeof(maxx) + sizeof(maxy) + std::accumulate(
                     players.begin(), players.end(),0,
                     [](size_t sum, std::string const& s){
-                        return sum + s.size();
+                        return sum + s.size() + 1;
                     });
-        }
-
-        void add_to_crc32(Crc32Computer& crc32_computer) const override {
-            crc32_computer.add(htobe(maxx));
-            crc32_computer.add(htobe(maxy));
-            for (auto const& player: players) {
-                crc32_computer.add(player);
-                crc32_computer.add('\0');
-            }
         }
 
         void pack(UDPSendBuffer& buff) const override {
@@ -190,12 +165,6 @@ namespace Worms {
             return sizeof(player_number) + sizeof(x) + sizeof(y);
         }
 
-        void add_to_crc32(Crc32Computer& crc32_computer) const override {
-            crc32_computer.add(htobe(player_number));
-            crc32_computer.add(htobe(x));
-            crc32_computer.add(htobe(y));
-        }
-
         void pack(UDPSendBuffer& buff) const override {
             buff.pack_field(player_number);
             buff.pack_field(x);
@@ -231,10 +200,6 @@ namespace Worms {
             return sizeof(player_number);
         }
 
-        void add_to_crc32(Crc32Computer& crc32_computer) const override {
-            crc32_computer.add(htobe(player_number));
-        }
-
         void pack(UDPSendBuffer& buff) const override {
             buff.pack_field(player_number);
         }
@@ -262,8 +227,6 @@ namespace Worms {
             return 0;
         }
 
-        void add_to_crc32(Crc32Computer&) const override {}
-
         void pack(UDPSendBuffer&) const override {}
 
         void pack_name(TCPSendBuffer &) const override {}
@@ -281,7 +244,8 @@ namespace Worms {
 
         buff.unpack_field(len);
 
-        buff.verify_crc32(sizeof(len), len); // Here Crc32Mismatch exception is thrown in case of bad crc
+        // Here Crc32Mismatch exception is thrown in case of bad crc.
+        buff.verify_crc32(sizeof(len), len);
 
         buff.unpack_field(event_no);
         buff.unpack_field(event_type);

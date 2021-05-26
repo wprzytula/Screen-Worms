@@ -8,7 +8,7 @@ namespace Worms {
     public:
         using crc32_t = uint32_t;
     private:
-        static uint32_t const MASK = 0xFFFFFFFF;
+        static constexpr uint32_t const MASK = 0xFFFFFFFF;
         static constexpr crc32_t const crc_table[256]{
                 0x00000000u, 0x77073096u, 0xee0e612cu, 0x990951bau, 0x076dc419u,
                 0x706af48fu, 0xe963a535u, 0x9e6495a3u, 0x0edb8832u, 0x79dcb8a4u,
@@ -94,7 +94,7 @@ namespace Worms {
     };
 
     template<>
-    void Crc32Computer::add<std::string>(std::string const &data) {
+    void Crc32Computer::add<std::string>(std::string const& data) {
         for (uint8_t i : data) {
             size_t lookup_index = (crc32 ^ i) & 0xFF;
             crc32 = (crc32 >> 8) ^ crc_table[lookup_index];

@@ -28,7 +28,7 @@ namespace Worms {
         UDPReceiveBuffer server_receive_buff;
         TCPSendBuffer iface_send_buff;
         TCPReceiveBuffer iface_receive_buff;
-        uint8_t turn_direction = 0;
+        uint8_t turn_direction = STRAIGHT;
         uint32_t next_expected_event_no = 0;
         std::set<std::unique_ptr<Event>, Event::Comparator> future_events;
         std::vector<std::string> players;
@@ -161,6 +161,7 @@ namespace Worms {
                     }
                 }
             } catch (Crc32Mismatch const &) {
+                fputs("Crc32 mismatch!\n", stderr);
                 server_receive_buff.discard();
             }
         }

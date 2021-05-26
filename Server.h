@@ -90,6 +90,7 @@ namespace Worms {
 
         void round_routine() {
             if (current_game.has_value()) {
+                cout << "Round " << round_no << " has begun!\n";
                 current_game->play_round();
                 current_game->disseminate_new_events(send_queue, sock);
                 if (current_game->finished()) {
@@ -136,34 +137,40 @@ namespace Worms {
 
         void handle_heartbeat() {
             auto sender = receive_buff.populate();
-            ClientHeartbeat heartbeat{receive_buff};
+            try {
+                // The following construction may fail with BadData
+                // if client sent us invalid heartbeat.
+                ClientHeartbeat heartbeat{receive_buff};
 
-            auto client_ptr = connected_clients.find(sender);
-            if (connected_clients.find(sender) == connected_clients.end()) {
-//                cout << "Address not found so far.\n";
-                if (player_names.find(heartbeat.player_name) == player_names.end()) {
-                    connect_client(sender, std::move(heartbeat));
-                } // else ignore and discard heartbeat
-                else {
-//                    cout << "Name already taken.\n";
-                }
-            } else { // client with the same address had been connected
-//                cout << "Address already taken\n";
-                auto &client = *client_ptr;
-                if (client->session_id == heartbeat.session_id) {
-                    client->heart_has_beaten(round_no);
-                    client->player.turn_direction = heartbeat.turn_direction;
-                    if (heartbeat.turn_direction == LEFT || heartbeat.turn_direction == RIGHT)
-                        client->player.got_ready();
+                auto client_ptr = connected_clients.find(sender);
+                if (connected_clients.find(sender) == connected_clients.end()) {
+                    if (player_names.find(heartbeat.player_name) == player_names.end()) {
+                        connect_client(sender, std::move(heartbeat));
+                    } // else ignore and discard heartbeat
+                } else { // client with the same address had been connected
+                    auto &client = *client_ptr;
+                    if (client->session_id == heartbeat.session_id) {
+                        client->heart_has_beaten(round_no);
+                        client->player.turn_direction = heartbeat.turn_direction;
 
-                    if (current_game.has_value()) {
-                        current_game->respond_with_events(send_queue, sock, sender,
-                                                          heartbeat.next_expected_event_no);
+                        if (heartbeat.turn_direction == LEFT || heartbeat.turn_direction == RIGHT)
+                            client->player.got_ready();
+
+                        if (current_game.has_value()) {
+                            current_game->respond_with_events(send_queue, sock, sender,
+                                                              heartbeat.next_expected_event_no);
+                        } else if (previous_game.has_value()) {
+                            previous_game->respond_with_events(send_queue, sock, sender,
+                                                               heartbeat.next_expected_event_no);
+                        }
+                    } else if (client->session_id > heartbeat.session_id) {
+                        disconnect_client(client_ptr);
+                        connect_client(sender, std::move(heartbeat));
                     }
-                } else if (client->session_id > heartbeat.session_id) {
-                    disconnect_client(client_ptr);
-                    connect_client(sender, std::move(heartbeat));
                 }
+            } catch (BadData const&) {
+                // Ignore invalid heartbeat.
+                fputs("Invalid heartbeat!", stderr);
             }
         }
 
@@ -200,12 +207,17 @@ namespace Worms {
                 << '\n';
 
             if (client->player.is_observer()) {
-                connected_unnames.erase(connected_unnames.find(client->player));
+                auto it = connected_unnames.find(client->player);
+                auto player_temp_copy = *it;
+                connected_unnames.erase(it);
+                player_temp_copy->disconnect();
             } else {
                 player_names.erase(client->player.player_name);
-                connected_players.erase(connected_players.find(client->player));
+                auto it = connected_players.find(client->player);
+                auto player_temp_copy = *it;
+                connected_players.erase(it);
+                player_temp_copy->disconnect();
             }
-            client->player.disconnect();
             connected_clients.erase(client_ptr);
         }
 

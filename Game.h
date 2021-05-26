@@ -85,9 +85,9 @@ namespace Worms {
                 if (!player->is_alive())
                     continue;
 
-                if (player->turn_direction == LEFT)
+                if (player->turn_direction == RIGHT)
                     player->angle += constants.turning_speed;
-                else if (player->turn_direction == RIGHT)
+                else if (player->turn_direction == LEFT)
                     player->angle -= constants.turning_speed;
 
                 Pixel before = player->position->as_pixel();
@@ -100,17 +100,17 @@ namespace Worms {
                     --alive_players_num;
                     generate_event(PLAYER_ELIMINATED_NUM, std::make_unique<Data_PLAYER_ELIMINATED>(
                             Data_PLAYER_ELIMINATED{static_cast<uint8_t>(i)}));
-                    if (alive_players_num == 0) {
-                        generate_event(GAME_OVER_NUM, std::make_unique<Data_GAME_OVER>());
+                    if (alive_players_num <= 1)
                         _finished = true;
-                        cout << "Game has ended!\n";
-                        break;
-                    }
                 } else {
                     board.eat(after);
                     generate_event(PIXEL_NUM, std::make_unique<Data_PIXEL>(
                             Data_PIXEL{static_cast<uint8_t>(i), after.x, after.y}));
                 }
+            }
+            if (_finished) {
+                cout << "Game has ended!\n";
+                generate_event(GAME_OVER_NUM, std::make_unique<Data_GAME_OVER>());
             }
         }
     private:
@@ -148,16 +148,20 @@ namespace Worms {
             if (next_event >= events.size())
                 return;
 
-            send_queue.emplace(receiver);
-            send_queue.back().pack_field(game_id);
-            for (auto it = events.begin() + static_cast<long>(next_event);
-                 it != events.end(); ++it) {
+            auto* buff_ptr = &send_queue.emplace(receiver);
+            buff_ptr->pack_field(game_id);
+
+            for (auto it = events.cbegin() + static_cast<long>(next_event);
+                 it != events.cend(); ++it) {
                 auto& event = *it;
-                if (send_queue.back().remaining() < event->size()) {
-                    send_queue.emplace(receiver); // A new buffer is needed, as the previous one is full.
-                    send_queue.back().pack_field(game_id);
+
+                if (buff_ptr->remaining() < event->size()) {
+                    // A new buffer is needed, as the previous one is full.
+                    buff_ptr = &send_queue.emplace(receiver);
+                    buff_ptr->pack_field(game_id);
                 }
-                event->pack(send_queue.back());
+
+                event->pack(*buff_ptr);
             }
         }
 
@@ -165,6 +169,8 @@ namespace Worms {
         void respond_with_events(std::queue<UDPSendBuffer>& queue, int const sock,
                                  sockaddr_in6 const& addr, uint32_t const next_event) {
             enqueue_event_package(queue, next_event,UDPEndpoint{sock, addr});
+            cout << "Responded with event package from " << next_event
+                 << " to " << events.size() <<  ".\n";
         }
 
         void disseminate_new_events(std::queue<UDPSendBuffer>& queue, int const sock) {
@@ -174,6 +180,9 @@ namespace Worms {
                                           UDPEndpoint{sock, player->client()->address});
                 }
             }
+            cout << "Disseminated events from " << next_disseminated_event_no
+                 << " to " << events.size() <<  ".\n";
+
             std::vector<decltype(observers.begin())> disconnected_observers;
             for (auto it = observers.begin(); it != observers.end(); ++it) {
                 if (it->expired()) {
@@ -186,6 +195,8 @@ namespace Worms {
             for (auto& disconnected: disconnected_observers) {
                 observers.erase(disconnected);
             }
+
+            next_disseminated_event_no = events.size();
         }
     };
 }

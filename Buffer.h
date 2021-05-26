@@ -4,6 +4,7 @@
 #include <arpa/inet.h>
 #include "defs.h"
 #include "Crc32Computer.h"
+#include <iostream>
 
 namespace Worms {
 
@@ -41,26 +42,22 @@ namespace Worms {
     class UDPSendBuffer {
     private:
         char buff[MAX_DATA_SIZE] = {0};
-        uint16_t _size;
+        size_t _size = 0;
         std::optional<int const> const receiver_sock;
         std::optional<UDPEndpoint> receiver;
 
     public:
         explicit UDPSendBuffer(int receiver_sock)
-                : _size{0}, receiver_sock{receiver_sock} {}
+                : receiver_sock{receiver_sock} {}
 
         explicit UDPSendBuffer(UDPEndpoint receiver)
-                : _size{0}, receiver{receiver} {}
+                : receiver{receiver} {}
 
-        ~UDPSendBuffer() {
-            assert(_size == 0);
-        }
-
-        [[nodiscard]] uint16_t size() const {
+        [[nodiscard]] size_t size() const {
             return _size;
         }
 
-        [[nodiscard]] uint16_t remaining() const {
+        [[nodiscard]] size_t remaining() const {
             return MAX_DATA_SIZE - _size;
         }
 
@@ -80,7 +77,6 @@ namespace Worms {
                     syserr(errno, "cannot send to remote host (UDP)");
                 return false;
             } else {
-                assert(_size == res);
                 _size = 0;
                 return true;
             }
@@ -93,10 +89,15 @@ namespace Worms {
             *((T*)(buff + _size)) = field;
             _size += sizeof(T);
         }
+
         void pack_string(std::string const& s) {
             assert(remaining() >= s.size());
             memcpy(buff + _size, s.c_str(), s.size());
             _size += s.size();
+        }
+
+        void compute_crc(uint32_t len) {
+            pack_field(Crc32Computer::compute_in_buffer(buff + _size - len, len));
         }
     };
 
@@ -132,7 +133,8 @@ namespace Worms {
 
         template<typename T, typename = std::enable_if_t<std::is_arithmetic_v<T>>>
         void unpack_field(T& field) {
-            assert(remaining() >= sizeof(T));
+            if (remaining() < sizeof(T))
+                throw BadData{};
             field = *((T*)(buff + pos));
             pos += sizeof(T);
             field = betoh(field);
@@ -158,9 +160,10 @@ namespace Worms {
         void verify_crc32(uint32_t len_before, uint32_t len_after) {
             if (pos + len_after + sizeof(crc32_t) > size)
                 throw BadData{};
-            crc32_t res = Crc32Computer::compute_in_buffer(buff + pos - len_before,
+            crc32_t computed = Crc32Computer::compute_in_buffer(buff + pos - len_before,
                                                             len_before + len_after);
-            if (res != betoh(*reinterpret_cast<crc32_t*>(buff + pos + len_after)))
+            crc32_t received = betoh(*reinterpret_cast<crc32_t*>(buff + pos + len_after));
+            if (computed != received)
                 throw Crc32Mismatch{};
         }
     };
@@ -314,12 +317,11 @@ namespace Worms {
             static size_t const messages_len[]{
                 strlen("RIGHT_KEY_DOWN\n"), strlen("RIGHT_KEY_UP\n"),
                     strlen("LEFT_KEY_DOWN\n"), strlen("LEFT_KEY_UP\n")};
-            static uint8_t const turn_direction[]{1, 0, 2, 0};
+            static uint8_t const turn_direction[]{RIGHT, STRAIGHT, LEFT, STRAIGHT};
 
             for (size_t i = 0; i < sizeof(messages) / sizeof(char const *); ++i) {
                 if (strncmp(buff + beg, messages[i], std::min(messages_len[i], end - beg)) == 0) {
                     beg += messages_len[i];
-//                    printf("Received from iface: %s", messages[i]);
                     return turn_direction[i];
                 }
             }
