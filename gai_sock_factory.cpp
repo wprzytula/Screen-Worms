@@ -1,6 +1,9 @@
 #include "defs.h"
 
 namespace Worms {
+    /* Attempts to resolve given hostname or address using getaddrinfo, then creates
+     * a socket of appriopriate family and connects to resolved address using it.
+     * If succeeded, returns the socket, else raises errors. */
     int gai_sock_factory(int sock_type, char const *name, uint16_t port) {
         struct addrinfo *addr_result{};
         struct addrinfo addr_hints{};

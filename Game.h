@@ -67,6 +67,8 @@ namespace Worms {
                             i, player_pixel.x, player_pixel.y));
                 }
             }
+
+            cout << "The game has begun!\n";
         }
 
         [[nodiscard]] bool finished() const {
@@ -101,6 +103,7 @@ namespace Worms {
                     if (alive_players_num == 0) {
                         generate_event(GAME_OVER_NUM, std::make_unique<Data_GAME_OVER>());
                         _finished = true;
+                        cout << "Game has ended!\n";
                         break;
                     }
                 } else {

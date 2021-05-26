@@ -3,8 +3,12 @@
 
 #include <arpa/inet.h>
 #include "defs.h"
+#include "Crc32Computer.h"
 
 namespace Worms {
+
+    class BadData : public std::exception {};
+    class Crc32Mismatch : public std::exception {};
 
     constexpr uint16_t const MAX_DATA_SIZE = 550;
 
@@ -21,12 +25,6 @@ namespace Worms {
             ssize_t res = recvfrom(sock, buff, MAX_DATA_SIZE, 0,
                                    reinterpret_cast<sockaddr*>(&_address), &addr_len);
             verify(res, "recvfrom");
-//            printf("res = %ld\n", res);
-//            puts("NEW ADDRESS:\t");
-//            for (uint i = 0; i < sizeof(sockaddr_in6); ++i) {
-//                printf("%d ", reinterpret_cast<char*>(&_address)[i]);
-//            }
-//            puts("");
             size = res;
         }
 
@@ -102,8 +100,6 @@ namespace Worms {
         }
     };
 
-    class UnendedName : public std::exception {};
-
     class UDPReceiveBuffer {
     private:
         int const sock;
@@ -119,6 +115,10 @@ namespace Worms {
             return pos == size;
         }
 
+        void discard() {
+            size = pos = 0;
+        }
+
         sockaddr_in6 populate() {
             assert(exhausted());
             size = pos = 0;
@@ -126,7 +126,7 @@ namespace Worms {
             return sender.value().address();
         }
 
-        [[nodiscard]] uint16_t remaining() const {
+        [[nodiscard]] size_t remaining() const {
             return size - pos;
         }
 
@@ -147,12 +147,21 @@ namespace Worms {
                 }
                 s.push_back(buff[pos++]);
             }
-            throw UnendedName{};
+            throw BadData{};
         }
 
         void unpack_remaining(std::string& s) {
             while (pos < size)
                 s.push_back(buff[pos++]);
+        }
+
+        void verify_crc32(uint32_t len_before, uint32_t len_after) {
+            if (pos + len_after + sizeof(crc32_t) > size)
+                throw BadData{};
+            crc32_t res = Crc32Computer::compute_in_buffer(buff + pos - len_before,
+                                                            len_before + len_after);
+            if (res != betoh(*reinterpret_cast<crc32_t*>(buff + pos + len_after)))
+                throw Crc32Mismatch{};
         }
     };
 
@@ -161,16 +170,19 @@ namespace Worms {
         int const sock;
         size_t const initial_capacity;
         char *buff;
-        size_t beg;
-        size_t end;
-        size_t size;
+        size_t beg = 0;
+        size_t end = 0;
+        size_t size = 0;
         size_t capacity;
     public:
         explicit TCPSendBuffer(int sock, size_t capacity)
-            : sock{sock}, initial_capacity{capacity}, beg{0}, end{0}, size{0}, capacity{capacity} {
+            : sock{sock}, initial_capacity{capacity}, capacity{capacity} {
             buff = static_cast<char*>(malloc(capacity));
             if (buff == nullptr)
                 syserr(errno, "malloc");
+        }
+        ~TCPSendBuffer() {
+            free(buff);
         }
     private:
         void grow() {
@@ -179,7 +191,7 @@ namespace Worms {
             if (buff == nullptr)
                 fatal("realloc");
 
-            memcpy(buff + capacity / 2, buff, beg);
+            memcpy(buff + (capacity >> 2), buff, beg);
             end = (beg + size) % capacity;
         }
 
@@ -216,57 +228,56 @@ namespace Worms {
 
         bool flush() {
             // Up to 2 subsequent writes: beg->capacity and end->beg
-            printf("\nIface send buffer contains:\n");
             if (size == 0)
                 return true;
             ssize_t res;
             size_t total_written = 0;
+//            printf("Iface send buffer contains:\n");
             if (beg < end) {
-                for (size_t i = beg; i < end; ++i) {
-                    putchar_unlocked(buff[i]);
-                }
+//                for (size_t i = beg; i < end; ++i) {
+//                    putchar_unlocked(buff[i]);
+//                }
                 res = write(sock, buff + beg, size);
                 if (res < 0)
-                    syserr(errno, "write");
+                    syserr(errno, "write to iface");
                 total_written += static_cast<size_t>(res);
                 if (static_cast<size_t>(res) < size) {
                     size -= total_written;
                     beg = (beg + total_written) % capacity;
-                    putchar_unlocked('\n');
+//                    putchar_unlocked('\n');
                     return false;
                 }
             } else {
-                for (size_t i = beg; i < capacity; ++i) {
-                    putchar_unlocked(buff[i]);
-                }
+//                for (size_t i = beg; i < capacity; ++i) {
+//                    putchar_unlocked(buff[i]);
+//                }
                 size_t first_portion = capacity - beg;
                 res = write(sock, buff + beg, first_portion);
                 if (res < 0)
-                    syserr(errno, "write");
+                    syserr(errno, "write to iface");
                 total_written += static_cast<size_t>(res);
                 if (static_cast<size_t>(res) < first_portion) {
                     size -= total_written;
                     beg = (beg + total_written) % capacity;
-                    putchar_unlocked('\n');
+//                    putchar_unlocked('\n');
                     return false;
                 }
 
-                for (size_t i = 0; i < end; ++i) {
-                    putchar_unlocked(buff[i]);
-                }
+//                for (size_t i = 0; i < end; ++i) {
+//                    putchar_unlocked(buff[i]);
+//                }
                 size_t second_portion = end;
                 res = write(sock, buff + beg, second_portion);
                 if (res < 0)
-                    syserr(errno, "write");
+                    syserr(errno, "write to iface");
                 total_written += static_cast<size_t>(res);
                 if (static_cast<size_t>(res) < second_portion) {
                     size -= total_written;
                     beg = (beg + total_written) % capacity;
-                    putchar_unlocked('\n');
+//                    putchar_unlocked('\n');
                     return false;
                 }
             }
-            putchar_unlocked('\n');
             assert(total_written == size);
             // If we are here, the buffer has been emptied, so we can reset it.
             beg = end = 0;
@@ -305,12 +316,10 @@ namespace Worms {
                     strlen("LEFT_KEY_DOWN\n"), strlen("LEFT_KEY_UP\n")};
             static uint8_t const turn_direction[]{1, 0, 2, 0};
 
-            assert(has_data());
-
             for (size_t i = 0; i < sizeof(messages) / sizeof(char const *); ++i) {
                 if (strncmp(buff + beg, messages[i], std::min(messages_len[i], end - beg)) == 0) {
                     beg += messages_len[i];
-                    printf("Received from iface: %s", messages[i]);
+//                    printf("Received from iface: %s", messages[i]);
                     return turn_direction[i];
                 }
             }
@@ -325,18 +334,20 @@ namespace Worms {
                 memcpy(buff, tmp, end - beg);
                 end = end - beg;
                 beg = 0;
+            } else {
+                beg = end = 0;
             }
             ssize_t res = read(sock, buff + end, TCP_BUFF_SIZE - end);
             verify(res, "read");
             end += res;
         }
 
-        void print() {
-            printf("Buffer receive iface contains:\n");
-            for (size_t i = beg; i < end; ++i) {
-                putchar_unlocked(buff[i]);
-            }
-        }
+//        void print() {
+//            printf("Buffer receive iface contains:\n");
+//            for (size_t i = beg; i < end; ++i) {
+//                putchar_unlocked(buff[i]);
+//            }
+//        }
     };
 }
 

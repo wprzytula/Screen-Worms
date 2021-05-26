@@ -28,18 +28,19 @@ namespace Worms {
         UDPReceiveBuffer server_receive_buff;
         TCPSendBuffer iface_send_buff;
         TCPReceiveBuffer iface_receive_buff;
-        uint8_t turn_direction;
-        uint32_t next_expected_event_no;
-        bool queued_heartbeat;
+        uint8_t turn_direction = 0;
+        uint32_t next_expected_event_no = 0;
         std::set<std::unique_ptr<Event>, Event::Comparator> future_events;
         std::vector<std::string> players;
+        uint32_t current_game_id{};
+        std::set<uint32_t> previous_game_ids;
 
 
     public:
         Client(std::string player_name, char const *game_server, uint16_t server_port,
                char const *game_iface, uint16_t iface_port)
                 : session_id{static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count())},
+                  std::chrono::system_clock::now().time_since_epoch()).count())},
                   player_name{std::move(player_name)},
                   server_sock{gai_sock_factory(SOCK_DGRAM, game_server, server_port)},
                   iface_sock{gai_sock_factory(SOCK_STREAM, game_iface, iface_port)},
@@ -48,8 +49,7 @@ namespace Worms {
                   server_send_buff{server_sock},
                   server_receive_buff{server_sock},
                   iface_send_buff{iface_sock, INITIAL_IFACE_BUFF_CAP},
-                  iface_receive_buff{iface_sock},
-                  turn_direction{0}, next_expected_event_no{0}, queued_heartbeat{false} {
+                  iface_receive_buff{iface_sock} {
 
             if (server_sock < 0 || iface_sock < 0)
                 syserr(errno, "opening sockets");
@@ -81,6 +81,7 @@ namespace Worms {
         }
 
     private:
+        /* Reacts accordingly to message from GUI interface. */
         void handle_iface_msg() {
             assert(!iface_receive_buff.has_data());
             iface_receive_buff.populate();
@@ -89,67 +90,84 @@ namespace Worms {
             }
         }
 
+        /* Sends periodical signal to server filled with status data. */
         void send_heartbeat() {
             server_send_buff.clear();
             ClientHeartbeat heartbeat{session_id, turn_direction, next_expected_event_no,
                                       player_name};
             heartbeat.pack(server_send_buff);
-            if (!server_send_buff.flush()) {
-                queued_heartbeat = true;
+            if (!server_send_buff.flush())
                 epoll.watch_fd_for_output(server_sock);
-            }
         }
 
+        /* Should it happened that server socket clogged up,
+         * here we later send the enqueued heartbeat after it becomes usable again. */
         void drain_server_queue() {
-            assert(queued_heartbeat);
-            queued_heartbeat = false;
             epoll.stop_watching_fd_for_output(server_sock);
-            assert(server_send_buff.flush() == server_send_buff.size());
+            server_send_buff.flush();
         }
 
+        /* Receives and parses new events, then resends them to GUI. */
         void handle_events() {
             assert(server_receive_buff.exhausted());
             server_receive_buff.populate();
 
             uint32_t game_id;
             server_receive_buff.unpack_field(game_id);
-
-            while (!server_receive_buff.exhausted()) {
-                auto event = unpack_event(server_receive_buff);
-
-                // TODO: NEW_GAME, GAME_OVER
-
-//                printf("Received event no %u\n", event->event_no);
-
-                if (event->event_no == next_expected_event_no) {
-                    ++next_expected_event_no;
-                    if (event->event_type == GAME_OVER_NUM) {
-                        next_expected_event_no = 0;
-                    } else {
-                        if (event->event_type == NEW_GAME_NUM)
-                            players = dynamic_cast<Event_NEW_GAME*>(event.get())->event_data.players;
-                        event->stringify(iface_send_buff, players);
-                    }
-                } else if (event->event_no > next_expected_event_no) {
-                    future_events.insert(std::move(event));
-                } // else discard duplicated event
-
-                while (!future_events.empty()) { // fetch previously received events from set
-                    if ((*future_events.begin())->event_no == next_expected_event_no) {
-                        (*future_events.begin())->stringify(iface_send_buff, players);
-                        future_events.erase(future_events.begin());
-                    } else {
-                        break;
-                    }
-                }
+            if (game_id != current_game_id &&
+                previous_game_ids.find(game_id) == previous_game_ids.end()) {
+                if (next_expected_event_no > 0)
+                    previous_game_ids.insert(current_game_id);
+                current_game_id = game_id;
+                future_events.clear();
+                next_expected_event_no = 0;
             }
 
-            if (!iface_send_buff.flush()) {
-                epoll.watch_fd_for_output(iface_sock);
+            try {
+                while (!server_receive_buff.exhausted()) {
+                    try {
+                        auto event = unpack_event(server_receive_buff);
+
+//                printf("Received event no %u type %hu\n", event->event_no, event->event_type);
+
+                        if (event->event_no == next_expected_event_no) {
+                            ++next_expected_event_no;
+                            if (event->event_type != GAME_OVER_NUM) {
+                                if (event->event_type == NEW_GAME_NUM)
+                                    players = dynamic_cast<Event_NEW_GAME *>(event.get())->event_data.players;
+                                event->stringify(iface_send_buff, players);
+                            }
+                        } else if (event->event_no > next_expected_event_no) {
+                            future_events.insert(std::move(event));
+                        } // else discard duplicated event
+
+                        while (!future_events.empty()) { // fetch previously received events from set
+                            if ((*future_events.begin())->event_no == next_expected_event_no) {
+                                if ((*future_events.begin())->event_type != GAME_OVER_NUM)
+                                    (*future_events.begin())->stringify(iface_send_buff, players);
+                                future_events.erase(future_events.begin());
+                            } else {
+                                break;
+                            }
+                        }
+                    } catch (UnknownEventType const &) {
+                        // ignore unknown type
+                    } catch (BadData const &) {
+                        fatal("Valid crc32, yet nonsense data received from server.");
+                    }
+
+                    if (!iface_send_buff.flush()) {
+                        epoll.watch_fd_for_output(iface_sock);
+                    }
+                }
+            } catch (Crc32Mismatch const &) {
+                server_receive_buff.discard();
             }
         }
 
     public:
+        /* Main client routine. Endless loop of sending heartbeat
+         * and responding to messages from server and iface. */
         [[noreturn]] void play() {
             {
                 struct timespec spec{.tv_sec = 0, .tv_nsec = COMMUNICATION_INTERVAL};

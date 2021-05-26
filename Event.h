@@ -9,7 +9,7 @@
 
 namespace Worms {
 
-    class Crc32Mismatch : public std::exception {};
+    class UnknownEventType : public std::exception {};
 
     struct Event {
         struct Comparator {
@@ -120,7 +120,7 @@ namespace Worms {
 
             len -= sizeof(maxx) + sizeof(maxy);
             try {
-                while (len < MAX_DATA_SIZE) {
+                while (len > 0 && len < MAX_DATA_SIZE) {
                     players.push_back(buff.unpack_name());
                     len -= players[players.size() - 1].size() + 1;
                 }
@@ -273,7 +273,6 @@ namespace Worms {
 
     using Event_GAME_OVER = EventImpl<Data_GAME_OVER>;
 
-
     /* Facilitates parsing incoming data. */
     inline std::unique_ptr<Event> unpack_event(UDPReceiveBuffer& buff) {
         uint32_t len;
@@ -281,6 +280,9 @@ namespace Worms {
         uint8_t event_type;
 
         buff.unpack_field(len);
+
+        buff.verify_crc32(sizeof(len), len); // Here Crc32Mismatch exception is thrown in case of bad crc
+
         buff.unpack_field(event_no);
         buff.unpack_field(event_type);
 
@@ -300,7 +302,7 @@ namespace Worms {
                 res = std::make_unique<Event_GAME_OVER>(len, event_no, event_type, buff);
                 break;
             default:
-                assert(false);
+                throw UnknownEventType{};
         }
         return res;
     }

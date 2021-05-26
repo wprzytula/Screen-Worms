@@ -59,7 +59,6 @@ namespace Worms {
 
         void watch_fd_for_output(int const fd) {
             assert(watching.find(fd) != watching.end());
-//            assert(!(watching[fd] & EPOLLOUT));
             if (watching[fd] & EPOLLOUT)
                 return;
             watching[fd] |= EPOLLOUT;
