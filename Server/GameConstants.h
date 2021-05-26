@@ -1,7 +1,7 @@
 #ifndef ROBAKI_GAMECONSTANTS_H
 #define ROBAKI_GAMECONSTANTS_H
 
-#include "defs.h"
+#include <cstdint>
 
 namespace Worms {
     struct GameConstants {

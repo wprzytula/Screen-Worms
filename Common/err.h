@@ -5,6 +5,8 @@
 #ifndef _ERR_
 #define _ERR_
 
+#include <cerrno>
+
 /* print system call error message and terminate */
 extern void syserr(int bl, const char *fmt, ...);
 
@@ -17,14 +19,5 @@ do { \
     if ((action) == -1) \
         syserr(errno, message); \
 } while (0)
-
-#ifdef DEBUG
-#define debug(action) \
-do { \
-    action; \
-} while (0)
-#else
-#define debug(action)
-#endif
 
 #endif

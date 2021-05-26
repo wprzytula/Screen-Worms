@@ -1,4 +1,13 @@
-#include "defs.h"
+#include <cstdint>
+#include <netdb.h>
+#include <cstring>
+#include <cassert>
+#include <unistd.h>
+
+#include <string>
+
+#include "../Common/err.h"
+
 
 namespace Worms {
     /* Attempts to resolve given hostname or address using getaddrinfo, then creates

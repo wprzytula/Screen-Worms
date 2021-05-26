@@ -3,7 +3,6 @@
 
 #include <utility>
 
-#include "defs.h"
 #include "Buffer.h"
 
 namespace Worms {

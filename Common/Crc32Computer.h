@@ -1,7 +1,7 @@
 #ifndef ROBAKI_CRC32COMPUTER_H
 #define ROBAKI_CRC32COMPUTER_H
 
-#include "defs.h"
+#include <cstdint>
 
 namespace Worms {
     class Crc32Computer {
@@ -94,7 +94,7 @@ namespace Worms {
     };
 
     template<>
-    void Crc32Computer::add<std::string>(std::string const& data) {
+    inline void Crc32Computer::add<std::string>(std::string const& data) {
         for (uint8_t i : data) {
             size_t lookup_index = (crc32 ^ i) & 0xFF;
             crc32 = (crc32 >> 8) ^ crc_table[lookup_index];

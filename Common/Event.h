@@ -2,8 +2,8 @@
 #define ROBAKI_EVENT_H
 
 #include <numeric>
+#include <memory>
 
-#include "defs.h"
 #include "Buffer.h"
 #include "Crc32Computer.h"
 
@@ -33,6 +33,9 @@ namespace Worms {
 
         virtual void pack(UDPSendBuffer& buff) const = 0;
 
+        virtual void check_validity(std::vector<std::string> const& players,
+                               uint32_t board_width, uint32_t board_height) = 0;
+
         virtual void stringify(TCPSendBuffer& buff, std::vector<std::string> const& players) const = 0;
     };
 
@@ -43,13 +46,17 @@ namespace Worms {
 
         virtual void pack(UDPSendBuffer& buff) const = 0;
 
+        virtual void check_validity(std::vector<std::string> const& players, uint32_t board_width,
+                            uint32_t board_height) = 0;
+
         virtual void stringify(TCPSendBuffer& buff,
                                std::vector<std::string> const& players) const = 0;
 
         virtual void pack_name(TCPSendBuffer& buff) const = 0;
     };
 
-    template<typename EventData, typename = std::enable_if_t<std::is_base_of_v<EventDataIface, EventData>>>
+    template<typename EventData,
+            typename = std::enable_if_t<std::is_base_of_v<EventDataIface, EventData>>>
     struct EventImpl : public Event {
 
         EventData event_data;
@@ -79,6 +86,11 @@ namespace Worms {
             buff.pack_field(event_type);
             event_data.pack(buff);
             buff.compute_crc(len + sizeof(len));
+        }
+
+        void check_validity(std::vector<std::string> const& players, uint32_t board_width,
+                            uint32_t board_height) override {
+            event_data.check_validity(players, board_width, board_height);
         }
 
         void stringify(TCPSendBuffer& buff,
@@ -134,6 +146,9 @@ namespace Worms {
             buff.pack_word("NEW_GAME");
         }
 
+        void check_validity(std::vector<std::string> const &, uint32_t,
+                            uint32_t) override {}
+
         void stringify(TCPSendBuffer &buff, std::vector<std::string> const&) const override {
             buff.pack_word(std::to_string(maxx));
             buff.pack_word(std::to_string(maxy));
@@ -175,6 +190,14 @@ namespace Worms {
             buff.pack_word("PIXEL");
         }
 
+        void check_validity(std::vector<std::string> const &players, uint32_t board_width,
+                            uint32_t board_height) override {
+            if (player_number >= players.size())
+                fatal("Invalid player number received from server!");
+            if (x >= board_width || y >= board_height)
+                fatal("Field out of bounds given by server!");
+        }
+
         void stringify(TCPSendBuffer &buff,
                        std::vector<std::string> const& players) const override {
             buff.pack_word(std::to_string(x));
@@ -208,6 +231,11 @@ namespace Worms {
             buff.pack_word("PLAYER_ELIMINATED");
         }
 
+        void check_validity(std::vector<std::string> const &players, uint32_t, uint32_t) override {
+            if (player_number >= players.size())
+                fatal("Invalid player number received from server!");
+        }
+
         void stringify(TCPSendBuffer &buff,
                        std::vector<std::string> const& players) const override {
             buff.pack_word(players[player_number]);
@@ -230,6 +258,9 @@ namespace Worms {
         void pack(UDPSendBuffer&) const override {}
 
         void pack_name(TCPSendBuffer &) const override {}
+
+        void check_validity(std::vector<std::string> const &, uint32_t,
+                            uint32_t) override {}
 
         void stringify(TCPSendBuffer &, std::vector<std::string> const&) const override {}
     };

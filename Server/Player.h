@@ -2,8 +2,8 @@
 #define ROBAKI_PLAYER_H
 
 #include <utility>
+#include <memory>
 
-#include "defs.h"
 #include "ClientData.h"
 #include "Board.h"
 
@@ -65,9 +65,6 @@ namespace Worms {
         }
 
         void got_ready() {
-            if (!ready) {
-                printf("%s got ready!\n", player_name.c_str());
-            }
             ready = true;
         }
 

@@ -1,6 +1,6 @@
 #include <getopt.h>
 
-#include "Client.h"
+#include "Client/Client.h"
 
 int main(int argc, char *argv[]) {
     int opt;

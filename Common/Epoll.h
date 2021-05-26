@@ -1,7 +1,15 @@
 #ifndef ROBAKI_EPOLL_H
 #define ROBAKI_EPOLL_H
 
-#include "defs.h"
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/epoll.h>
+#include <cassert>
+
+#include <map>
+
+#include "err.h"
+
 
 namespace Worms {
     class Epoll {
@@ -18,8 +26,7 @@ namespace Worms {
         }
 
         ~Epoll() {
-            if (close(epoll_fd) != 0)
-                fputs("Error closing epoll epoll_fd", stderr);
+            close(epoll_fd);
         }
 
         void add_fd(int const fd) {

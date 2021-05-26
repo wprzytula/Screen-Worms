@@ -12,7 +12,7 @@ namespace Worms {
 
         uint32_t operator()() {
             uint32_t const ret = next_val;
-            next_val = (uint64_t{next_val} * 279410273ULL) % 4294967291;
+            next_val = (static_cast<uint64_t>(next_val) * 279410273ULL) % 4294967291;
             return ret;
         }
     };

@@ -1,7 +1,8 @@
 #ifndef ROBAKI_CLIENTDATA_H
 #define ROBAKI_CLIENTDATA_H
 
-#include "defs.h"
+#include <cstring>
+#include <netinet/in.h>
 
 namespace Worms {
     class Player;
@@ -26,7 +27,8 @@ namespace Worms {
                 return operator()(c.address, addr);
             }
 
-            bool operator()(std::shared_ptr<ClientData> const &c1, std::shared_ptr<ClientData> const &c2) const {
+            bool operator()(std::shared_ptr<ClientData> const &c1,
+                    std::shared_ptr<ClientData> const &c2) const {
                 return operator()(*c1, *c2);
             }
 

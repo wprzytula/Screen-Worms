@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.12)
 project(Robaki)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -7,11 +7,11 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(CMAKE_CXX_FLAGS "-Wall -Wextra -O2 -std=gnu++17")
 
-add_library(err err.cpp err.h)
+add_library(err Common/err.cpp Common/err.h)
 
-add_executable(screen-worms-client client.cpp gai_sock_factory.cpp Event.h Buffer.h Crc32Computer.h ClientHeartbeat.h Pixel.h defs.h Epoll.h Client.h)
+add_executable(screen-worms-client client_main.cpp Client/gai_sock_factory.cpp Common/Event.h Common/Buffer.h Common/Crc32Computer.h Common/ClientHeartbeat.h Server/Pixel.h Common/Epoll.h Client/Client.h Common/Buffer.cpp Client/Client.cpp)
 target_link_libraries(screen-worms-client err)
-add_executable(screen-worms-server server.cpp Event.h Buffer.h RandomGenerator.h Board.h GameConstants.h Crc32Computer.h ClientHeartbeat.h Pixel.h ClientData.h defs.h Epoll.h Player.h Game.h Server.h)
+add_executable(screen-worms-server server_main.cpp Common/Event.h Common/Buffer.h Server/RandomGenerator.h Server/Board.h Server/GameConstants.h Common/Crc32Computer.h Common/ClientHeartbeat.h Server/Pixel.h Server/ClientData.h Common/Epoll.h Server/Player.h Server/Game.h Server/Server.h Common/Buffer.cpp Server/Server.cpp Server/Game.cpp)
 target_link_libraries(screen-worms-server err)
 
 find_package(PkgConfig REQUIRED)
