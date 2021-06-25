@@ -1,4 +1,5 @@
 #include <getopt.h>
+#include "cerrno"
 
 #include "Server/Server.h"
 
@@ -14,16 +15,13 @@ int main(int argc, char *argv[]) {
 
     while ((opt = getopt(argc, argv, "p:s:t:v:w:h:")) != -1) {
         if (opt == '?') {
-            bad_syntax:
-            fprintf(stderr, "Usage: %s [-p n] [-s n] [-t n] [-v n] [-w n] [-h n]\n",
-                    argv[0]);
-            exit(EXIT_FAILURE);
+            goto bad_syntax;
         } else {
             errno = 0;
-            parsed_arg = strtoul(optarg, nullptr, 10);
-            if (errno != 0 || parsed_arg > UINT32_MAX)
+            char *badchar;
+            parsed_arg = strtoul(optarg, &badchar, 10);
+            if (*badchar != '\0' || errno != 0 || parsed_arg > UINT32_MAX || parsed_arg == 0)
                 goto bad_syntax;
-
             switch (opt) {
                 case 'p':
                     if (parsed_arg > UINT16_MAX)
@@ -50,6 +48,13 @@ int main(int argc, char *argv[]) {
             }
         }
     }
+    if (optind != argc) {
+        bad_syntax:
+        fprintf(stderr, "Usage: %s [-p n] [-s n] [-t n] [-v n] [-w n] [-h n]\n",
+                argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
 
     Worms::Server server{port, seed, {turning_speed, rounds_per_sec, width, height}};
 
